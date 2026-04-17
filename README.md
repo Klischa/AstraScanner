@@ -205,9 +205,9 @@ out/build/Release/Release/AstraScanner.exe
 
 ---
 
-📞 Контакты и ссылки
+📞 Контакты и ссылки                                                           klischa@yandex.ru
 
-· GitHub‑репозиторий: https://github.com/Klischa/AstraScanner
+· GitHub‑репозиторий: https://github.com/Klischa/AstraScanner.              
 · Сообщить об ошибке:[issues](https://github.com/Klischa/AstraScanner/issues)
 
 ---
