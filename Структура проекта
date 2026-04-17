@@ -1,0 +1,34 @@
+AstraScanner/
+├── CMakeLists.txt
+├── .vscode/
+│   └── settings.json
+├── data/
+│   └── camera_calibration.xml
+├── src/
+│   ├── main.cpp
+│   ├── capture/
+│   │   ├── AstraCamera.h
+│   │   ├── AstraCamera.cpp
+│   │   ├── CaptureWorker.h
+│   │   └── CaptureWorker.cpp
+│   ├── calibration/
+│   │   ├── CameraCalibrator.h
+│   │   └── CameraCalibrator.cpp
+│   ├── filters/
+│   │   ├── PointCloudFilters.h
+│   │   └── PointCloudFilters.cpp
+│   └── gui/
+│       ├── MainWindow.h
+│       └── MainWindow.cpp
+├── resources/
+├── out/
+│   └── build/
+│       └── Release/
+│           └── Release/
+│               ├── AstraScanner.exe
+│               ├── platforms/
+│               ├── OpenNI2/
+│               │   └── Drivers/
+│               └── *.dll
+└── logs/
+    └── scanner.log
