@@ -76,6 +76,9 @@ set(SOURCES
     src/capture/CaptureWorker.cpp
     src/calibration/CameraCalibrator.cpp
     src/filters/PointCloudFilters.cpp
+    src/settings/SettingsManager.cpp
+    src/export/ExportManager.cpp
+    src/project/ProjectManager.cpp
 )
 
 add_executable(${PROJECT_NAME} WIN32 ${SOURCES})

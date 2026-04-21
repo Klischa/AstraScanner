@@ -31,7 +31,9 @@ void CaptureWorker::process()
     cv::FileStorage fs("data/camera_calibration.xml", cv::FileStorage::READ);
     if (fs.isOpened()) {
         cv::Mat K;
+        cv::Size imageSize;
         fs["camera_matrix"] >> K;
+        fs["image_size"] >> imageSize;
         if (!K.empty() && K.cols == 3 && K.rows == 3) {
             // OpenCV сохраняет calibrateCamera() в CV_64F, но файл может быть
             // подправлен вручную. Приводим к double независимо от исходного типа.
@@ -41,12 +43,20 @@ void CaptureWorker::process()
             m_fy = static_cast<float>(K64.at<double>(1,1));
             m_cx = static_cast<float>(K64.at<double>(0,2));
             m_cy = static_cast<float>(K64.at<double>(1,2));
+            m_calibWidth  = imageSize.width;
+            m_calibHeight = imageSize.height;
             m_intrinsicsLoaded = true;
-            qInfo() << "[Worker] Loaded calibration: fx=" << m_fx << "fy=" << m_fy << "cx=" << m_cx << "cy=" << m_cy;
+            qInfo() << "[Worker] Loaded calibration: fx=" << m_fx << "fy=" << m_fy
+                    << "cx=" << m_cx << "cy=" << m_cy
+                    << "at" << m_calibWidth << "x" << m_calibHeight;
         }
         fs.release();
     } else {
         if (camera.getIntrinsics(m_fx, m_fy, m_cx, m_cy)) {
+            // OpenNI отдаёт интринсики для сенсора глубины в его собственном
+            // разрешении, масштабирование не требуется.
+            m_calibWidth  = 0;
+            m_calibHeight = 0;
             m_intrinsicsLoaded = true;
             qInfo() << "[Worker] Camera intrinsics: fx=" << m_fx << "fy=" << m_fy << "cx=" << m_cx << "cy=" << m_cy;
         }
@@ -55,6 +65,8 @@ void CaptureWorker::process()
     if (std::isnan(m_fx) || m_fx < 100) {
         m_fx = m_fy = 570.0f;
         m_cx = 320.0f; m_cy = 240.0f;
+        m_calibWidth = 0;
+        m_calibHeight = 0;
         qWarning() << "[Worker] Using default intrinsics";
     }
 
@@ -77,6 +89,11 @@ void CaptureWorker::process()
             }
 
             if (m_cloudProcessingEnabled) {
+                // Приводим интринсики к разрешению depth-кадра один раз после
+                // получения первого кадра. Astra Pro всегда отдаёт depth в
+                // одном и том же разрешении, так что пересчёт не требуется на
+                // каждой итерации — но мы проверяем флаг дешёво.
+                scaleIntrinsicsToDepth(depth.cols, depth.rows);
                 auto cloud = convertToPointCloud(depth, color, m_fx, m_fy, m_cx, m_cy);
                 if (cloud && !cloud->empty()) {
                     if (++cloudSendCounter % 3 == 0) {
@@ -111,6 +128,26 @@ void CaptureWorker::stop()
 {
     qDebug() << "[Worker] Stop requested";
     m_running = false;
+}
+
+void CaptureWorker::scaleIntrinsicsToDepth(int depthWidth, int depthHeight)
+{
+    if (m_calibWidth <= 0 || m_calibHeight <= 0) return;
+    if (depthWidth <= 0 || depthHeight <= 0) return;
+    if (m_calibWidth == depthWidth && m_calibHeight == depthHeight) return;
+
+    const float sx = static_cast<float>(depthWidth)  / static_cast<float>(m_calibWidth);
+    const float sy = static_cast<float>(depthHeight) / static_cast<float>(m_calibHeight);
+    m_fx *= sx;
+    m_fy *= sy;
+    m_cx *= sx;
+    m_cy *= sy;
+    m_calibWidth  = depthWidth;
+    m_calibHeight = depthHeight;
+    qInfo() << "[Worker] Scaled intrinsics to depth resolution:"
+            << depthWidth << "x" << depthHeight
+            << "sx=" << sx << "sy=" << sy
+            << "-> fx=" << m_fx << "fy=" << m_fy << "cx=" << m_cx << "cy=" << m_cy;
 }
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr CaptureWorker::convertToPointCloud(
