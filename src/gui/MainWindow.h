@@ -27,6 +27,13 @@ class CaptureWorker;
 class CameraCalibrator;
 class LiveCloudWindow;
 class PointCloudFilters;
+class ProjectManager;
+class ExportManager;
+
+QT_BEGIN_NAMESPACE
+class QListWidget;
+class QListWidgetItem;
+QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
@@ -60,6 +67,18 @@ private slots:
     void onCalibCalibrateClicked();
     void onCalibResetClicked();
     void onCalibrationStatus(const QString &msg);
+
+    // --- Проект / экспорт ---
+    void onNewProject();
+    void onOpenProject();
+    void onSaveProject();
+    void onSaveProjectAs();
+    void onAddCurrentCloudToProject();
+    void onExportCurrentCloud();
+    void onExportMesh();
+    void onScansListContextMenu(const QPoint &pos);
+    void onScansListDoubleClicked(QListWidgetItem *item);
+    void refreshScansList();
 
 private:
     void setupUI();
@@ -116,6 +135,15 @@ private:
     PointCloudFilters *m_filters = nullptr;
 
     QTextEdit *m_logTextEdit = nullptr;
+
+    // --- Проект / экспорт ---
+    ProjectManager *m_project = nullptr;
+    ExportManager *m_exporter = nullptr;
+    QListWidget *m_scansList = nullptr;
+    QLabel *m_projectStatusLabel = nullptr;
+    // Последний реконструированный меш (Poisson). Пока пустой — STL/OBJ
+    // экспорт недоступен, об этом сообщаем пользователю.
+    pcl::PolygonMesh m_lastMesh;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений

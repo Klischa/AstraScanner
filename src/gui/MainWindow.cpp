@@ -3,6 +3,9 @@
 #include "../calibration/CameraCalibrator.h"
 #include "LiveCloudWindow.h"
 #include "../filters/PointCloudFilters.h"
+#include "../settings/SettingsManager.h"
+#include "../export/ExportManager.h"
+#include "../project/ProjectManager.h"
 
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -21,6 +24,13 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QSlider>
+#include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QAction>
+#include <QFileDialog>
+#include <QInputDialog>
+#include <QDir>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkGenericOpenGLRenderWindow.h>
 
@@ -42,6 +52,17 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_liveCloudWindow = new LiveCloudWindow(this);
     m_filters = new PointCloudFilters(this);
+    m_project = new ProjectManager(this);
+    m_exporter = new ExportManager(this);
+    connect(m_project, &ProjectManager::projectChanged, this, [this]() {
+        if (m_projectStatusLabel) {
+            const QString base = m_project->isOpen()
+                                     ? QString("Проект: %1").arg(m_project->projectName())
+                                     : QString("Проект: (не открыт)");
+            m_projectStatusLabel->setText(m_project->isDirty() ? base + " *" : base);
+        }
+    });
+    connect(m_project, &ProjectManager::scansChanged, this, &MainWindow::refreshScansList);
 
     setupUI();
     setupVisualizer();
@@ -95,6 +116,27 @@ void MainWindow::setupUI()
     QWidget* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
     QVBoxLayout* mainLayout = new QVBoxLayout(centralWidget);
+
+    // --- Меню «Файл» / «Экспорт» ---
+    QMenu *fileMenu = menuBar()->addMenu("&Файл");
+    QAction *newAct = fileMenu->addAction("Новый проект…");
+    QAction *openAct = fileMenu->addAction("Открыть проект…");
+    QAction *saveAct = fileMenu->addAction("Сохранить проект");
+    QAction *saveAsAct = fileMenu->addAction("Сохранить проект как…");
+    newAct->setShortcut(QKeySequence::New);
+    openAct->setShortcut(QKeySequence::Open);
+    saveAct->setShortcut(QKeySequence::Save);
+    saveAsAct->setShortcut(QKeySequence::SaveAs);
+    connect(newAct,    &QAction::triggered, this, &MainWindow::onNewProject);
+    connect(openAct,   &QAction::triggered, this, &MainWindow::onOpenProject);
+    connect(saveAct,   &QAction::triggered, this, &MainWindow::onSaveProject);
+    connect(saveAsAct, &QAction::triggered, this, &MainWindow::onSaveProjectAs);
+
+    QMenu *exportMenu = menuBar()->addMenu("&Экспорт");
+    QAction *exportCloudAct = exportMenu->addAction("Экспорт текущего облака…");
+    QAction *exportMeshAct  = exportMenu->addAction("Экспорт меша…");
+    connect(exportCloudAct, &QAction::triggered, this, &MainWindow::onExportCurrentCloud);
+    connect(exportMeshAct,  &QAction::triggered, this, &MainWindow::onExportMesh);
 
     m_tabWidget = new QTabWidget(this);
     mainLayout->addWidget(m_tabWidget);
@@ -415,6 +457,36 @@ void MainWindow::setupUI()
     connect(m_filters, &PointCloudFilters::filterCompleted, this, [this](const QString &filter, int before, int after) {
         statusBar()->showMessage(QString("%1: %2 -> %3 точек").arg(filter).arg(before).arg(after), 3000);
     });
+
+    // Вкладка "Проект" — список сохранённых сканов + кнопки управления.
+    QWidget *projectTab = new QWidget();
+    m_tabWidget->addTab(projectTab, "Проект");
+    QVBoxLayout *projectLayout = new QVBoxLayout(projectTab);
+
+    m_projectStatusLabel = new QLabel("Проект: (не открыт)", this);
+    projectLayout->addWidget(m_projectStatusLabel);
+
+    QHBoxLayout *projectBtnRow = new QHBoxLayout();
+    QPushButton *addScanBtn = new QPushButton("Добавить текущее облако как скан", this);
+    QPushButton *exportCloudBtn = new QPushButton("Экспорт текущего облака…", this);
+    QPushButton *exportMeshBtn = new QPushButton("Экспорт меша…", this);
+    projectBtnRow->addWidget(addScanBtn);
+    projectBtnRow->addWidget(exportCloudBtn);
+    projectBtnRow->addWidget(exportMeshBtn);
+    projectBtnRow->addStretch();
+    projectLayout->addLayout(projectBtnRow);
+
+    m_scansList = new QListWidget(this);
+    m_scansList->setContextMenuPolicy(Qt::CustomContextMenu);
+    projectLayout->addWidget(m_scansList, 1);
+
+    connect(addScanBtn, &QPushButton::clicked, this, &MainWindow::onAddCurrentCloudToProject);
+    connect(exportCloudBtn, &QPushButton::clicked, this, &MainWindow::onExportCurrentCloud);
+    connect(exportMeshBtn, &QPushButton::clicked, this, &MainWindow::onExportMesh);
+    connect(m_scansList, &QListWidget::customContextMenuRequested,
+            this, &MainWindow::onScansListContextMenu);
+    connect(m_scansList, &QListWidget::itemDoubleClicked,
+            this, &MainWindow::onScansListDoubleClicked);
 
     // Вкладка "Логи" — fileMessageHandler форвардит сюда все сообщения Qt.
     QWidget* logTab = new QWidget();
@@ -769,4 +841,260 @@ void MainWindow::onCalibResetClicked()
 void MainWindow::onCalibrationStatus(const QString &msg)
 {
     m_calibStatusLabel->setText(msg);
+}
+
+// ========== Проект ==========
+
+void MainWindow::onNewProject()
+{
+    if (m_project->isDirty()) {
+        auto r = QMessageBox::question(this, "Новый проект",
+            "Текущий проект не сохранён. Создать новый и отбросить изменения?");
+        if (r != QMessageBox::Yes) return;
+    }
+
+    const QString baseDir = SettingsManager::instance().projectsDirectory();
+    const QString dir = QFileDialog::getSaveFileName(
+        this, "Создать новый проект (укажите папку)", baseDir,
+        QString(), nullptr, QFileDialog::ShowDirsOnly | QFileDialog::DontConfirmOverwrite);
+    if (dir.isEmpty()) return;
+
+    if (!m_project->newProject(dir)) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+        return;
+    }
+    SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
+    refreshScansList();
+}
+
+void MainWindow::onOpenProject()
+{
+    if (m_project->isDirty()) {
+        auto r = QMessageBox::question(this, "Открыть проект",
+            "Текущий проект не сохранён. Открыть другой и отбросить изменения?");
+        if (r != QMessageBox::Yes) return;
+    }
+    const QString baseDir = SettingsManager::instance().projectsDirectory();
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, "Выберите папку проекта", baseDir);
+    if (dir.isEmpty()) return;
+
+    if (!m_project->openProject(dir)) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+        return;
+    }
+    SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
+    refreshScansList();
+}
+
+void MainWindow::onSaveProject()
+{
+    if (!m_project->isOpen()) {
+        onSaveProjectAs();
+        return;
+    }
+    if (!m_project->saveProject()) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+    } else {
+        statusBar()->showMessage("Проект сохранён", 3000);
+    }
+}
+
+void MainWindow::onSaveProjectAs()
+{
+    const QString baseDir = SettingsManager::instance().projectsDirectory();
+    const QString dir = QFileDialog::getSaveFileName(
+        this, "Сохранить проект как…", baseDir,
+        QString(), nullptr, QFileDialog::ShowDirsOnly | QFileDialog::DontConfirmOverwrite);
+    if (dir.isEmpty()) return;
+
+    if (!m_project->isOpen()) {
+        if (!m_project->newProject(dir)) {
+            QMessageBox::warning(this, "Ошибка", m_project->lastError());
+            return;
+        }
+    } else if (!m_project->saveProjectAs(dir)) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+        return;
+    }
+    SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
+    refreshScansList();
+}
+
+void MainWindow::onAddCurrentCloudToProject()
+{
+    QMutexLocker locker(&m_cloudMutex);
+    if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+        QMessageBox::information(this, "Проект", "Текущее облако пустое.");
+        return;
+    }
+    if (!m_project->isOpen()) {
+        auto r = QMessageBox::question(this, "Проект не открыт",
+            "Проект не открыт. Создать новый проект?");
+        if (r != QMessageBox::Yes) return;
+        locker.unlock();
+        onNewProject();
+        locker.relock();
+        if (!m_project->isOpen()) return;
+    }
+
+    // Копируем облако, чтобы дальнейшие изменения m_accumulatedCloud не
+    // влияли на сохранённый скан.
+    auto snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, "Имя скана",
+        "Введите имя скана:", QLineEdit::Normal,
+        QString("Scan %1").arg(m_project->scanCount() + 1), &ok);
+    if (!ok) return;
+
+    // addScan использует файловый I/O — временно отпускаем мьютекс облака,
+    // чтобы не блокировать пайплайн захвата.
+    locker.unlock();
+    const int idx = m_project->addScan(snapshot, name);
+    if (idx < 0) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+        return;
+    }
+    statusBar()->showMessage(QString("Скан добавлен в проект (%1 точек)")
+                                 .arg(snapshot->size()),
+                             3000);
+}
+
+void MainWindow::onExportCurrentCloud()
+{
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudCopy;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+            QMessageBox::information(this, "Экспорт", "Текущее облако пустое.");
+            return;
+        }
+        cloudCopy = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+
+    const QString baseDir = SettingsManager::instance().lastExportDirectory();
+    const QString filter = ExportManager::cloudFileFilters().join(";;");
+    QString selected;
+    const QString filename = QFileDialog::getSaveFileName(
+        this, "Экспорт облака", baseDir, filter, &selected);
+    if (filename.isEmpty()) return;
+
+    SettingsManager::instance().setLastExportDirectory(QFileInfo(filename).absolutePath());
+    if (!m_exporter->savePointCloud(cloudCopy, filename)) {
+        QMessageBox::warning(this, "Ошибка экспорта", m_exporter->lastError());
+        return;
+    }
+    statusBar()->showMessage(QString("Экспортировано: %1").arg(filename), 5000);
+}
+
+void MainWindow::onExportMesh()
+{
+    if (m_lastMesh.polygons.empty()) {
+        QMessageBox::information(this, "Экспорт меша",
+            "Меш ещё не построен. Сначала выполните реконструкцию поверхности.");
+        return;
+    }
+
+    const QString baseDir = SettingsManager::instance().lastExportDirectory();
+    const QString filter = ExportManager::meshFileFilters().join(";;");
+    QString selected;
+    const QString filename = QFileDialog::getSaveFileName(
+        this, "Экспорт меша", baseDir, filter, &selected);
+    if (filename.isEmpty()) return;
+
+    SettingsManager::instance().setLastExportDirectory(QFileInfo(filename).absolutePath());
+    if (!m_exporter->savePolygonMesh(m_lastMesh, filename)) {
+        QMessageBox::warning(this, "Ошибка экспорта", m_exporter->lastError());
+        return;
+    }
+    statusBar()->showMessage(QString("Меш экспортирован: %1").arg(filename), 5000);
+}
+
+void MainWindow::onScansListContextMenu(const QPoint &pos)
+{
+    QListWidgetItem *item = m_scansList->itemAt(pos);
+    if (!item) return;
+    const int idx = m_scansList->row(item);
+
+    QMenu menu(this);
+    QAction *loadAct   = menu.addAction("Загрузить как текущее облако");
+    QAction *renameAct = menu.addAction("Переименовать…");
+    QAction *exportAct = menu.addAction("Экспорт…");
+    menu.addSeparator();
+    QAction *removeAct = menu.addAction("Удалить");
+
+    QAction *chosen = menu.exec(m_scansList->mapToGlobal(pos));
+    if (!chosen) return;
+    if (chosen == loadAct) {
+        auto cloud = m_project->scanCloud(idx);
+        if (!cloud) {
+            QMessageBox::warning(this, "Ошибка", m_project->lastError());
+            return;
+        }
+        QMutexLocker locker(&m_cloudMutex);
+        *m_accumulatedCloud = *cloud;
+        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+        updateViewer();
+    } else if (chosen == renameAct) {
+        bool ok = false;
+        const QString newName = QInputDialog::getText(this, "Переименовать скан",
+            "Новое имя:", QLineEdit::Normal,
+            m_project->scans().at(idx).name, &ok);
+        if (ok && !newName.isEmpty()) {
+            m_project->renameScan(idx, newName);
+        }
+    } else if (chosen == exportAct) {
+        auto cloud = m_project->scanCloud(idx);
+        if (!cloud) {
+            QMessageBox::warning(this, "Ошибка", m_project->lastError());
+            return;
+        }
+        const QString baseDir = SettingsManager::instance().lastExportDirectory();
+        const QString filter = ExportManager::cloudFileFilters().join(";;");
+        const QString filename = QFileDialog::getSaveFileName(
+            this, "Экспорт скана", baseDir, filter);
+        if (filename.isEmpty()) return;
+        SettingsManager::instance().setLastExportDirectory(QFileInfo(filename).absolutePath());
+        if (!m_exporter->savePointCloud(cloud, filename)) {
+            QMessageBox::warning(this, "Ошибка", m_exporter->lastError());
+        }
+    } else if (chosen == removeAct) {
+        auto r = QMessageBox::question(this, "Удалить скан",
+            QString("Удалить скан «%1»?").arg(m_project->scans().at(idx).name));
+        if (r == QMessageBox::Yes) m_project->removeScan(idx);
+    }
+}
+
+void MainWindow::onScansListDoubleClicked(QListWidgetItem *item)
+{
+    if (!item) return;
+    const int idx = m_scansList->row(item);
+    auto cloud = m_project->scanCloud(idx);
+    if (!cloud) {
+        QMessageBox::warning(this, "Ошибка", m_project->lastError());
+        return;
+    }
+    QMutexLocker locker(&m_cloudMutex);
+    *m_accumulatedCloud = *cloud;
+    emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+    updateViewer();
+}
+
+void MainWindow::refreshScansList()
+{
+    if (!m_scansList) return;
+    m_scansList->clear();
+    for (const ScanItem &item : m_project->scans()) {
+        const QString label = QString("%1  (%2 точек, %3)")
+                                  .arg(item.name)
+                                  .arg(item.pointCount)
+                                  .arg(item.createdAt.toString("yyyy-MM-dd HH:mm"));
+        m_scansList->addItem(label);
+    }
+    if (m_projectStatusLabel) {
+        const QString base = m_project->isOpen()
+                                 ? QString("Проект: %1").arg(m_project->projectName())
+                                 : QString("Проект: (не открыт)");
+        m_projectStatusLabel->setText(m_project->isDirty() ? base + " *" : base);
+    }
 }

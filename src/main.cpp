@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QCoreApplication>
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -58,6 +59,12 @@ int main(int argc, char *argv[])
     fmt.setVersion(3, 2);
     fmt.setProfile(QSurfaceFormat::CoreProfile);
     QSurfaceFormat::setDefaultFormat(fmt);
+
+    // QSettings читает эти поля — выставляем до создания QApplication, чтобы
+    // SettingsManager из любого места мог полагаться на них.
+    QCoreApplication::setOrganizationName("AstraScanner");
+    QCoreApplication::setOrganizationDomain("astra-scanner.local");
+    QCoreApplication::setApplicationName("AstraScanner");
 
     QApplication app(argc, argv);
 
