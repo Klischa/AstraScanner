@@ -4,6 +4,7 @@
 #include <QObject>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/PolygonMesh.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
@@ -14,6 +15,26 @@ class PointCloudFilters : public QObject
 {
     Q_OBJECT
 public:
+    // Параметры Poisson-реконструкции. Значения по умолчанию выбраны под
+    // объекты 0.2–0.5 м, отсканированные Astra Pro на расстоянии ~0.5–1.0 м.
+    // depth — логарифм размера сетки октодерева (8 = 256^3, 9 = 512^3, …).
+    // С increase depth качество растёт, но время и память — экспоненциально.
+    // pointWeight (screenedPoissonWeight) >0 включает screened-вариант:
+    // восстановленная поверхность ближе следует исходным точкам.
+    struct PoissonParams {
+        int depth = 9;
+        int minDepth = 5;
+        float pointWeight = 4.0f;
+        float samplesPerNode = 1.5f;
+        float scale = 1.1f;
+        bool confidence = false;
+        bool outputPolygons = false;
+        // Радиус поиска соседей для оценки нормалей; 0 → k-nearest вместо
+        // radius search (см. kNearest).
+        double normalSearchRadius = 0.01;
+        int kNearest = 20;
+    };
+
     explicit PointCloudFilters(QObject *parent = nullptr);
 
     // Фильтры очистки
@@ -43,6 +64,16 @@ public:
     // Объединение нескольких сканов
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr mergeScans(
         const std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &scans);
+
+    // Poisson Surface Reconstruction: строит замкнутый водонепроницаемый меш
+    // из плотного облака точек. Внутри оценивает нормали (если их нет),
+    // ориентирует их, затем запускает pcl::Poisson. Возвращает непустой
+    // pcl::PolygonMesh при успехе; при ошибке mesh.polygons будет пустым и
+    // сообщение уйдёт через qWarning. Может занимать секунды-минуты на
+    // плотных облаках; вызывать из worker-потока (QtConcurrent::run и т.п.).
+    pcl::PolygonMesh reconstructPoissonMesh(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        const PoissonParams &params = {});
 
 signals:
     void progressUpdated(int percentage);

@@ -42,6 +42,22 @@ public:
     int rorMinNeighbors() const;
     void setRorMinNeighbors(int n);
 
+    // --- Poisson-реконструкция ---
+    int poissonDepth() const;               // typical 8..10
+    void setPoissonDepth(int depth);
+
+    double poissonPointWeight() const;      // screenedPoissonWeight
+    void setPoissonPointWeight(double w);
+
+    double poissonSamplesPerNode() const;
+    void setPoissonSamplesPerNode(double n);
+
+    double poissonNormalRadius() const;     // метры; 0 → k-nearest
+    void setPoissonNormalRadius(double meters);
+
+    int poissonKNearest() const;            // если normalRadius == 0
+    void setPoissonKNearest(int k);
+
     // --- Пути ---
     QString projectsDirectory() const;
     void setProjectsDirectory(const QString &path);

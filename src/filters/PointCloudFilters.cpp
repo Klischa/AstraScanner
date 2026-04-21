@@ -3,7 +3,10 @@
 #include <pcl/common/transforms.h>
 #include <pcl/registration/icp.h>
 #include <pcl/features/normal_3d.h>
+#include <pcl/features/normal_3d_omp.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/surface/poisson.h>
+#include <pcl/common/io.h>
 
 PointCloudFilters::PointCloudFilters(QObject *parent) : QObject(parent) {}
 
@@ -165,4 +168,93 @@ void PointCloudFilters::computeNormals(const pcl::PointCloud<pcl::PointXYZRGB>::
     ne.setSearchMethod(tree);
     ne.setRadiusSearch(0.03);
     ne.compute(*normals);
+}
+
+pcl::PolygonMesh PointCloudFilters::reconstructPoissonMesh(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    const PoissonParams &params)
+{
+    pcl::PolygonMesh mesh;
+    if (!cloud || cloud->empty()) {
+        qWarning() << "[Poisson] Empty input cloud";
+        return mesh;
+    }
+
+    emit progressUpdated(5);
+
+    // 1. Оценка нормалей. Используем OMP-версию — на 4+ ядрах это в разы
+    //    быстрее, чем однопоточный NormalEstimation.
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+    pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> ne;
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+    ne.setInputCloud(cloud);
+    ne.setSearchMethod(tree);
+    if (params.normalSearchRadius > 0.0) {
+        ne.setRadiusSearch(params.normalSearchRadius);
+    } else {
+        ne.setKSearch(params.kNearest);
+    }
+    // Примерный центр облака вместо (0,0,0): точки могут быть далеко от
+    // начала координат, иначе setViewPoint ориентирует нормали некорректно.
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid(*cloud, centroid);
+    ne.setViewPoint(centroid[0], centroid[1], centroid[2] - 1.0f);
+    ne.compute(*normals);
+
+    if (normals->size() != cloud->size()) {
+        qWarning() << "[Poisson] Normal estimation failed: got" << normals->size()
+                   << "normals for" << cloud->size() << "points";
+        return mesh;
+    }
+    emit progressUpdated(30);
+
+    // 2. Склеиваем XYZRGB + Normal → PointNormal (Poisson в PCL ожидает его).
+    pcl::PointCloud<pcl::PointNormal>::Ptr cloudWithNormals(new pcl::PointCloud<pcl::PointNormal>);
+    cloudWithNormals->reserve(cloud->size());
+    for (std::size_t i = 0; i < cloud->size(); ++i) {
+        pcl::PointNormal p;
+        p.x = cloud->points[i].x;
+        p.y = cloud->points[i].y;
+        p.z = cloud->points[i].z;
+        p.normal_x = normals->points[i].normal_x;
+        p.normal_y = normals->points[i].normal_y;
+        p.normal_z = normals->points[i].normal_z;
+        p.curvature = normals->points[i].curvature;
+        if (!std::isfinite(p.x) || !std::isfinite(p.normal_x)) continue;
+        cloudWithNormals->push_back(p);
+    }
+    cloudWithNormals->width = cloudWithNormals->size();
+    cloudWithNormals->height = 1;
+    cloudWithNormals->is_dense = true;
+
+    if (cloudWithNormals->empty()) {
+        qWarning() << "[Poisson] No finite oriented points after filtering";
+        return mesh;
+    }
+    emit progressUpdated(45);
+
+    // 3. Собственно Poisson. Параметры screened-варианта дают меньше
+    //    «раздутия» меша; при этом depth ≥ 8 критичен для тонких деталей.
+    pcl::Poisson<pcl::PointNormal> poisson;
+    poisson.setInputCloud(cloudWithNormals);
+    poisson.setDepth(params.depth);
+    poisson.setMinDepth(params.minDepth);
+    poisson.setPointWeight(params.pointWeight);
+    poisson.setSamplesPerNode(params.samplesPerNode);
+    poisson.setScale(params.scale);
+    poisson.setConfidence(params.confidence);
+    poisson.setOutputPolygons(params.outputPolygons);
+    poisson.reconstruct(mesh);
+
+    emit progressUpdated(100);
+
+    const std::size_t nPoly = mesh.polygons.size();
+    if (nPoly == 0) {
+        qWarning() << "[Poisson] Reconstruction returned empty mesh";
+    } else {
+        qInfo() << "[Poisson] Reconstructed" << nPoly << "polygons from"
+                << cloudWithNormals->size() << "oriented points"
+                << "(depth=" << params.depth << ")";
+    }
+    return mesh;
 }

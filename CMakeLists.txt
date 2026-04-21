@@ -21,10 +21,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL Concurrent)
 find_package(OpenCV REQUIRED)
-# Добавляем registration и features
-find_package(PCL 1.15 REQUIRED COMPONENTS common io visualization filters registration features)
+# surface нужен для Poisson-реконструкции; остальные — как и раньше.
+find_package(PCL 1.15 REQUIRED COMPONENTS common io visualization filters registration features surface)
 find_package(VTK REQUIRED COMPONENTS
     CommonCore
     FiltersSources
@@ -87,6 +87,7 @@ target_link_libraries(${PROJECT_NAME}
     Qt6::Core
     Qt6::Widgets
     Qt6::OpenGL
+    Qt6::Concurrent
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     ${VTK_LIBRARIES}

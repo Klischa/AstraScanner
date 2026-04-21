@@ -31,6 +31,9 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QDir>
+#include <QtConcurrent/QtConcurrent>
+#include <QFuture>
+#include <QFutureWatcher>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkGenericOpenGLRenderWindow.h>
 
@@ -399,6 +402,119 @@ void MainWindow::setupUI()
     registrationLayout->addWidget(registrationProgress);
 
     processingLayout->addWidget(registrationGroup);
+
+    // --- Poisson Surface Reconstruction ---
+    QGroupBox *meshGroup = new QGroupBox("Реконструкция поверхности (Poisson)", this);
+    QVBoxLayout *meshLayout = new QVBoxLayout(meshGroup);
+
+    SettingsManager &settings = SettingsManager::instance();
+
+    QHBoxLayout *poissonParamsRow = new QHBoxLayout();
+    QLabel *depthLabel = new QLabel("Depth:", this);
+    QSpinBox *depthSpin = new QSpinBox(this);
+    depthSpin->setRange(5, 12);
+    depthSpin->setValue(settings.poissonDepth());
+    depthSpin->setToolTip("Глубина октодерева. 8≈256^3, 9≈512^3, 10≈1024^3. "
+                          "Больше = детальнее, но квадратично больше памяти и времени.");
+
+    QLabel *pointWeightLabel = new QLabel("Point weight:", this);
+    QDoubleSpinBox *pointWeightSpin = new QDoubleSpinBox(this);
+    pointWeightSpin->setRange(0.0, 20.0);
+    pointWeightSpin->setSingleStep(0.5);
+    pointWeightSpin->setValue(settings.poissonPointWeight());
+    pointWeightSpin->setToolTip("Screened-Poisson weight. 0 = классический Poisson, "
+                                "≥4 = screened (плотнее следует точкам).");
+
+    QLabel *samplesLabel = new QLabel("Samples/node:", this);
+    QDoubleSpinBox *samplesSpin = new QDoubleSpinBox(this);
+    samplesSpin->setRange(1.0, 20.0);
+    samplesSpin->setSingleStep(0.5);
+    samplesSpin->setValue(settings.poissonSamplesPerNode());
+    samplesSpin->setToolTip("Сколько точек должно попасть в лист октодерева. "
+                            "Больше = меньше шумных нод.");
+
+    poissonParamsRow->addWidget(depthLabel);
+    poissonParamsRow->addWidget(depthSpin);
+    poissonParamsRow->addSpacing(12);
+    poissonParamsRow->addWidget(pointWeightLabel);
+    poissonParamsRow->addWidget(pointWeightSpin);
+    poissonParamsRow->addSpacing(12);
+    poissonParamsRow->addWidget(samplesLabel);
+    poissonParamsRow->addWidget(samplesSpin);
+    poissonParamsRow->addStretch();
+    meshLayout->addLayout(poissonParamsRow);
+
+    QHBoxLayout *normalRow = new QHBoxLayout();
+    QLabel *normalRadiusLabel = new QLabel("Normal radius (м):", this);
+    QDoubleSpinBox *normalRadiusSpin = new QDoubleSpinBox(this);
+    normalRadiusSpin->setRange(0.0, 0.1);
+    normalRadiusSpin->setDecimals(4);
+    normalRadiusSpin->setSingleStep(0.001);
+    normalRadiusSpin->setValue(settings.poissonNormalRadius());
+    normalRadiusSpin->setToolTip("Радиус поиска соседей для оценки нормалей. "
+                                 "0 → использовать k ближайших (см. поле k).");
+
+    QLabel *kNearestLabel = new QLabel("k ближайших:", this);
+    QSpinBox *kNearestSpin = new QSpinBox(this);
+    kNearestSpin->setRange(5, 100);
+    kNearestSpin->setValue(settings.poissonKNearest());
+
+    normalRow->addWidget(normalRadiusLabel);
+    normalRow->addWidget(normalRadiusSpin);
+    normalRow->addSpacing(12);
+    normalRow->addWidget(kNearestLabel);
+    normalRow->addWidget(kNearestSpin);
+    normalRow->addStretch();
+    meshLayout->addLayout(normalRow);
+
+    QPushButton *reconstructBtn = new QPushButton("Построить меш", this);
+    QPushButton *showCloudBtn   = new QPushButton("Показать облако", this);
+    QPushButton *exportMeshBtnP = new QPushButton("Экспорт меша…", this);
+    QHBoxLayout *meshBtnRow = new QHBoxLayout();
+    meshBtnRow->addWidget(reconstructBtn);
+    meshBtnRow->addWidget(showCloudBtn);
+    meshBtnRow->addWidget(exportMeshBtnP);
+    meshBtnRow->addStretch();
+    meshLayout->addLayout(meshBtnRow);
+
+    m_poissonProgress = new QProgressBar(this);
+    m_poissonProgress->setRange(0, 100);
+    m_poissonProgress->setValue(0);
+    meshLayout->addWidget(m_poissonProgress);
+
+    m_meshStatusLabel = new QLabel("Меш не построен", this);
+    meshLayout->addWidget(m_meshStatusLabel);
+
+    processingLayout->addWidget(meshGroup);
+
+    // Прогресс Poisson — через `progressUpdated` от PointCloudFilters. Он
+    // эмитится и при ICP-мерже, чтобы не было путаницы между индикаторами,
+    // сбрасываем значение при начале реконструкции.
+    connect(m_filters, &PointCloudFilters::progressUpdated,
+            m_poissonProgress, &QProgressBar::setValue);
+
+    connect(reconstructBtn, &QPushButton::clicked, this,
+        [this, depthSpin, pointWeightSpin, samplesSpin, normalRadiusSpin, kNearestSpin, reconstructBtn]() {
+            PointCloudFilters::PoissonParams p;
+            p.depth = depthSpin->value();
+            p.pointWeight = static_cast<float>(pointWeightSpin->value());
+            p.samplesPerNode = static_cast<float>(samplesSpin->value());
+            p.normalSearchRadius = normalRadiusSpin->value();
+            p.kNearest = kNearestSpin->value();
+
+            SettingsManager &s = SettingsManager::instance();
+            s.setPoissonDepth(p.depth);
+            s.setPoissonPointWeight(p.pointWeight);
+            s.setPoissonSamplesPerNode(p.samplesPerNode);
+            s.setPoissonNormalRadius(p.normalSearchRadius);
+            s.setPoissonKNearest(p.kNearest);
+
+            reconstructBtn->setEnabled(false);
+            onReconstructMeshClicked(p);
+        });
+
+    connect(showCloudBtn, &QPushButton::clicked, this, &MainWindow::onShowCloudClicked);
+    connect(exportMeshBtnP, &QPushButton::clicked, this, &MainWindow::onExportMesh);
 
     connect(sorBtn, &QPushButton::clicked, this, [this, sorMeanKSpin, sorThreshSpin]() {
         QMutexLocker locker(&m_cloudMutex);
@@ -1097,4 +1213,107 @@ void MainWindow::refreshScansList()
                                  : QString("Проект: (не открыт)");
         m_projectStatusLabel->setText(m_project->isDirty() ? base + " *" : base);
     }
+}
+
+// ========== Poisson-реконструкция ==========
+
+void MainWindow::onReconstructMeshClicked(const PointCloudFilters::PoissonParams &params)
+{
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+            QMessageBox::information(this, "Реконструкция", "Облако пустое.");
+            return;
+        }
+        // Копия, чтобы не держать mutex пока Poisson работает секунды-минуты.
+        snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+
+    if (m_poissonWatcher && m_poissonWatcher->isRunning()) {
+        QMessageBox::information(this, "Реконструкция",
+            "Реконструкция уже запущена — дождитесь её завершения.");
+        return;
+    }
+
+    if (m_meshStatusLabel) m_meshStatusLabel->setText(
+        QString("Выполняется реконструкция… (%1 точек, depth=%2)")
+            .arg(snapshot->size()).arg(params.depth));
+    if (m_poissonProgress) m_poissonProgress->setValue(0);
+    statusBar()->showMessage("Poisson: идёт реконструкция…");
+
+    // Не создаём m_filters заново — он qobject с сигналом progressUpdated,
+    // который уже подключён к m_poissonProgress. Но сам вызов выполняется в
+    // worker-потоке через QtConcurrent::run.
+    if (!m_poissonWatcher) {
+        m_poissonWatcher = new QFutureWatcher<pcl::PolygonMesh>(this);
+        connect(m_poissonWatcher, &QFutureWatcher<pcl::PolygonMesh>::finished,
+                this, &MainWindow::onPoissonFinished);
+    }
+
+    QFuture<pcl::PolygonMesh> future = QtConcurrent::run([this, snapshot, params]() {
+        return m_filters->reconstructPoissonMesh(snapshot, params);
+    });
+    m_poissonWatcher->setFuture(future);
+}
+
+void MainWindow::onPoissonFinished()
+{
+    if (!m_poissonWatcher) return;
+    const pcl::PolygonMesh mesh = m_poissonWatcher->result();
+
+    // Повторно активируем кнопку «Построить меш» — ищем её по группе меша.
+    for (QPushButton *btn : findChildren<QPushButton*>()) {
+        if (btn->text() == "Построить меш") btn->setEnabled(true);
+    }
+
+    if (mesh.polygons.empty()) {
+        statusBar()->showMessage("Poisson: реконструкция не удалась", 5000);
+        if (m_meshStatusLabel) m_meshStatusLabel->setText("Меш не построен (см. лог)");
+        if (m_poissonProgress) m_poissonProgress->setValue(0);
+        QMessageBox::warning(this, "Реконструкция",
+            "Poisson не смог построить меш. Возможные причины: "
+            "слишком редкое облако, неверно ориентированные нормали, "
+            "нехватка памяти. Подробности — на вкладке «Логи».");
+        return;
+    }
+
+    m_lastMesh = mesh;
+    const qulonglong nPoly = static_cast<qulonglong>(mesh.polygons.size());
+    if (m_meshStatusLabel) m_meshStatusLabel->setText(
+        QString("Меш построен: %1 полигонов").arg(nPoly));
+    statusBar()->showMessage(QString("Poisson: готов меш из %1 полигонов").arg(nPoly), 5000);
+    if (m_poissonProgress) m_poissonProgress->setValue(100);
+
+    // Показываем меш в вьюаре. Убираем накопленное облако, чтобы не
+    // перекрывало меш — пользователь может вернуть его кнопкой «Показать
+    // облако».
+    if (m_viewer) {
+        m_viewer->removeAllPointClouds();
+        if (!m_meshViewerId.isEmpty()) {
+            m_viewer->removePolygonMesh(m_meshViewerId.toStdString());
+        }
+        m_meshViewerId = "poisson_mesh";
+        m_viewer->addPolygonMesh(m_lastMesh, m_meshViewerId.toStdString());
+        m_vtkWidget->renderWindow()->Render();
+    }
+}
+
+void MainWindow::onShowCloudClicked()
+{
+    if (!m_viewer) return;
+    if (!m_meshViewerId.isEmpty()) {
+        m_viewer->removePolygonMesh(m_meshViewerId.toStdString());
+        m_meshViewerId.clear();
+    }
+    QMutexLocker locker(&m_cloudMutex);
+    if (m_accumulatedCloud && !m_accumulatedCloud->empty()) {
+        bool updated = m_viewer->updatePointCloud(m_accumulatedCloud, "accumulated");
+        if (!updated) {
+            m_viewer->addPointCloud(m_accumulatedCloud, "accumulated");
+            m_viewer->setPointCloudRenderingProperties(
+                pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "accumulated");
+        }
+    }
+    m_vtkWidget->renderWindow()->Render();
 }
