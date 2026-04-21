@@ -6,7 +6,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_definitions(-DNOMINMAX)
 
-set(CMAKE_TOOLCHAIN_FILE "C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+# Allow overriding the vcpkg toolchain via -DCMAKE_TOOLCHAIN_FILE=... or VCPKG_ROOT env var.
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+            CACHE STRING "Vcpkg toolchain file")
+    elseif(EXISTS "C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake")
+        set(CMAKE_TOOLCHAIN_FILE "C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake"
+            CACHE STRING "Vcpkg toolchain file")
+    endif()
+endif()
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
@@ -25,11 +34,30 @@ find_package(VTK REQUIRED COMPONENTS
     GUISupportQt
 )
 
-set(OPENNI2_ROOT "C:/orbbec/OpenNI_2.3.0.86_202210111950_4c8f5aa4_beta6_windows/Win64-Release/sdk")
+# OpenNI2 SDK location: override with -DOPENNI2_ROOT=... or the OPENNI2_ROOT env var.
+if(NOT DEFINED OPENNI2_ROOT)
+    if(DEFINED ENV{OPENNI2_ROOT})
+        set(OPENNI2_ROOT "$ENV{OPENNI2_ROOT}" CACHE PATH "Path to the OpenNI2 SDK root")
+    else()
+        set(OPENNI2_ROOT "C:/orbbec/OpenNI_2.3.0.86_202210111950_4c8f5aa4_beta6_windows/Win64-Release/sdk"
+            CACHE PATH "Path to the OpenNI2 SDK root")
+    endif()
+endif()
 set(OPENNI2_INCLUDE_DIR "${OPENNI2_ROOT}/Include")
 set(OPENNI2_LIBRARY "${OPENNI2_ROOT}/libs/OpenNI2.lib")
 set(OPENNI2_DLL      "${OPENNI2_ROOT}/libs/OpenNI2.dll")
 set(OPENNI2_DRIVERS  "${OPENNI2_ROOT}/libs/OpenNI2/Drivers")
+
+# vcpkg installed prefix used for post-build DLL copies (Qt platforms, runtime DLLs).
+if(NOT DEFINED VCPKG_INSTALLED_DIR)
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_ROOT}/installed/x64-windows"
+            CACHE PATH "vcpkg installed prefix")
+    else()
+        set(VCPKG_INSTALLED_DIR "C:/dev/vcpkg/installed/x64-windows"
+            CACHE PATH "vcpkg installed prefix")
+    endif()
+endif()
 
 include_directories(
     ${OPENNI2_INCLUDE_DIR}
@@ -77,13 +105,13 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "--- Copying Qt platforms ---"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "C:/dev/vcpkg/installed/x64-windows/$<IF:$<CONFIG:Debug>,debug,release>/Qt6/plugins/platforms"
+        "${VCPKG_INSTALLED_DIR}/$<IF:$<CONFIG:Debug>,debug,release>/Qt6/plugins/platforms"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/platforms" || (exit 0)
 )
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "--- Copying vcpkg runtime DLLs ---"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "C:/dev/vcpkg/installed/x64-windows/$<IF:$<CONFIG:Debug>,debug,release>/bin"
+        "${VCPKG_INSTALLED_DIR}/$<IF:$<CONFIG:Debug>,debug,release>/bin"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>" || (exit 0)
 )
