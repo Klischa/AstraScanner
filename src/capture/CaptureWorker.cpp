@@ -1,6 +1,7 @@
 #include "CaptureWorker.h"
 #include "AstraCamera.h"
 #include "../accel/GpuAccelerator.h"
+#include "../settings/SettingsManager.h"
 #include <QThread>
 #include <QCoreApplication>
 #include <QDebug>
@@ -81,6 +82,9 @@ void CaptureWorker::process()
     cv::Mat color, depth;
     int frameCounter = 0;
     int cloudSendCounter = 0;
+    const int frameSkip = SettingsManager::instance().frameSkip();
+    const double voxelLeaf = SettingsManager::instance().voxelLeafSize();
+    qInfo() << "[Worker] frameSkip =" << frameSkip << ", voxelLeaf =" << voxelLeaf;
     while (m_running) {
         if (camera.readFrame(color, depth) && !color.empty() && !depth.empty()) {
             if (!m_cloudProcessingEnabled && frameCounter % 10 == 0) {
@@ -100,10 +104,11 @@ void CaptureWorker::process()
                 auto cloud = GpuAccelerator::instance().depthToCloud(
                     depth, color, m_fx, m_fy, m_cx, m_cy, 3);
                 if (cloud && !cloud->empty()) {
-                    if (++cloudSendCounter % 3 == 0) {
+                    if (++cloudSendCounter % frameSkip == 0) {
+                        const float leaf = static_cast<float>(voxelLeaf);
                         pcl::VoxelGrid<pcl::PointXYZRGB> voxel;
                         voxel.setInputCloud(cloud);
-                        voxel.setLeafSize(0.002f, 0.002f, 0.002f);
+                        voxel.setLeafSize(leaf, leaf, leaf);
                         pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
                         voxel.filter(*filtered);
                         emit pointCloudReady(filtered);

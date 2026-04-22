@@ -20,6 +20,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "../filters/PointCloudFilters.h"
+#include "../history/CloudHistory.h"
 
 QT_BEGIN_NAMESPACE
 class QTabWidget;
@@ -96,6 +97,11 @@ private slots:
     void onMergeScansClicked(const PointCloudFilters::MergeParams &params);
     void onMergeFinished();
     void onSaveMergedToProject();
+
+    // --- Undo/Redo ---
+    void onUndo();
+    void onRedo();
+    void updateUndoRedoActions();
 
     // --- Настройки (единый диалог) ---
     void onShowSettingsDialog();
@@ -195,6 +201,11 @@ private:
     QDoubleSpinBox  *m_poissonVpY = nullptr;
     QDoubleSpinBox  *m_poissonVpZ = nullptr;
     QCheckBox       *m_poissonConsistentOrientChk = nullptr;
+
+    // Undo/Redo
+    CloudHistory    *m_cloudHistory = nullptr;
+    QAction         *m_undoAction = nullptr;
+    QAction         *m_redoAction = nullptr;
 
     // Поворотный стол / авто-сохранение
     QTimer          *m_turntableTimer = nullptr;

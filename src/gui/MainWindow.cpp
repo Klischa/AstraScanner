@@ -60,6 +60,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_filters = new PointCloudFilters(this);
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
+    m_cloudHistory = new CloudHistory(this);
     connect(m_project, &ProjectManager::projectChanged, this, [this]() {
         if (m_projectStatusLabel) {
             const QString base = m_project->isOpen()
@@ -137,6 +138,21 @@ void MainWindow::setupUI()
     connect(openAct,   &QAction::triggered, this, &MainWindow::onOpenProject);
     connect(saveAct,   &QAction::triggered, this, &MainWindow::onSaveProject);
     connect(saveAsAct, &QAction::triggered, this, &MainWindow::onSaveProjectAs);
+
+    // --- Меню «Правка» (Undo/Redo) ---
+    QMenu *editMenu = menuBar()->addMenu("&Правка");
+    m_undoAction = editMenu->addAction("Отменить");
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    m_undoAction->setEnabled(false);
+    connect(m_undoAction, &QAction::triggered, this, &MainWindow::onUndo);
+
+    m_redoAction = editMenu->addAction("Повторить");
+    m_redoAction->setShortcut(QKeySequence::Redo);
+    m_redoAction->setEnabled(false);
+    connect(m_redoAction, &QAction::triggered, this, &MainWindow::onRedo);
+
+    connect(m_cloudHistory, &CloudHistory::historyChanged,
+            this, &MainWindow::updateUndoRedoActions);
 
     QMenu *exportMenu = menuBar()->addMenu("&Экспорт");
     QAction *exportCloudAct = exportMenu->addAction("Экспорт текущего облака…");
@@ -709,46 +725,101 @@ void MainWindow::setupUI()
     connect(showCloudBtn, &QPushButton::clicked, this, &MainWindow::onShowCloudClicked);
     connect(exportMeshBtnP, &QPushButton::clicked, this, &MainWindow::onExportMesh);
 
-    connect(sorBtn, &QPushButton::clicked, this, [this, sorMeanKSpin, sorThreshSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    // --- Фильтры: Undo + фоновый поток (QtConcurrent) ---
+    // Перед каждой деструктивной операцией сохраняем состояние в CloudHistory.
+    // Сама фильтрация выполняется в фоновом потоке, чтобы не блокировать GUI.
 
-        auto filtered = m_filters->applyStatisticalOutlierRemoval(
-            m_accumulatedCloud, sorMeanKSpin->value(), sorThreshSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+    connect(sorBtn, &QPushButton::clicked, this, [this, sorBtn, sorMeanKSpin, sorThreshSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            m_cloudHistory->pushState(m_accumulatedCloud, "SOR");
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        sorBtn->setEnabled(false);
+        statusBar()->showMessage("SOR: выполняется…");
+        const int meanK = sorMeanKSpin->value();
+        const double thresh = sorThreshSpin->value();
+        QtConcurrent::run([this, snapshot, meanK, thresh, sorBtn]() {
+            auto filtered = m_filters->applyStatisticalOutlierRemoval(snapshot, meanK, thresh);
+            QMetaObject::invokeMethod(this, [this, filtered, sorBtn]() {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+                emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+                updateViewer();
+                sorBtn->setEnabled(true);
+            }, Qt::QueuedConnection);
+        });
     });
 
-    connect(rorBtn, &QPushButton::clicked, this, [this, rorRadiusSpin, rorNeighborsSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
-
-        auto filtered = m_filters->applyRadiusOutlierRemoval(
-            m_accumulatedCloud, rorRadiusSpin->value(), rorNeighborsSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+    connect(rorBtn, &QPushButton::clicked, this, [this, rorBtn, rorRadiusSpin, rorNeighborsSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            m_cloudHistory->pushState(m_accumulatedCloud, "ROR");
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        rorBtn->setEnabled(false);
+        statusBar()->showMessage("ROR: выполняется…");
+        const double radius = rorRadiusSpin->value();
+        const int neighbors = rorNeighborsSpin->value();
+        QtConcurrent::run([this, snapshot, radius, neighbors, rorBtn]() {
+            auto filtered = m_filters->applyRadiusOutlierRemoval(snapshot, radius, neighbors);
+            QMetaObject::invokeMethod(this, [this, filtered, rorBtn]() {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+                emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+                updateViewer();
+                rorBtn->setEnabled(true);
+            }, Qt::QueuedConnection);
+        });
     });
 
-    connect(voxelBtn, &QPushButton::clicked, this, [this, voxelSizeSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
-
-        auto filtered = m_filters->applyVoxelGrid(m_accumulatedCloud, voxelSizeSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+    connect(voxelBtn, &QPushButton::clicked, this, [this, voxelBtn, voxelSizeSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            m_cloudHistory->pushState(m_accumulatedCloud, "VoxelGrid");
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        voxelBtn->setEnabled(false);
+        statusBar()->showMessage("VoxelGrid: выполняется…");
+        const float leaf = static_cast<float>(voxelSizeSpin->value());
+        QtConcurrent::run([this, snapshot, leaf, voxelBtn]() {
+            auto filtered = m_filters->applyVoxelGrid(snapshot, leaf);
+            QMetaObject::invokeMethod(this, [this, filtered, voxelBtn]() {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+                emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+                updateViewer();
+                voxelBtn->setEnabled(true);
+            }, Qt::QueuedConnection);
+        });
     });
 
-    connect(magicWandBtn, &QPushButton::clicked, this, [this]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
-
-        auto filtered = m_filters->applyMagicWand(m_accumulatedCloud);
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+    connect(magicWandBtn, &QPushButton::clicked, this, [this, magicWandBtn]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            m_cloudHistory->pushState(m_accumulatedCloud, "Magic Wand");
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        magicWandBtn->setEnabled(false);
+        statusBar()->showMessage("Magic Wand: выполняется…");
+        QtConcurrent::run([this, snapshot, magicWandBtn]() {
+            auto filtered = m_filters->applyMagicWand(snapshot);
+            QMetaObject::invokeMethod(this, [this, filtered, magicWandBtn]() {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+                emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+                updateViewer();
+                magicWandBtn->setEnabled(true);
+            }, Qt::QueuedConnection);
+        });
     });
 
     connect(mergeScansBtn, &QPushButton::clicked, this,
@@ -890,6 +961,7 @@ void MainWindow::onScanClicked()
         QMutexLocker locker(&m_cloudMutex);
         if (m_accumulatedCloud) m_accumulatedCloud->clear();
     }
+    if (m_cloudHistory) m_cloudHistory->clear();
     if (m_viewer) {
         m_viewer->removeAllPointClouds();
         m_vtkWidget->renderWindow()->Render();
@@ -897,7 +969,8 @@ void MainWindow::onScanClicked()
     emit cloudSizeChanged(0);
     qDebug() << "Scan started";
 
-    m_scanTimeoutTimer->start(5 * 60 * 1000);
+    const int timeoutMs = SettingsManager::instance().scanTimeoutSec() * 1000;
+    m_scanTimeoutTimer->start(timeoutMs);
     startCapture(true);
 }
 
@@ -942,6 +1015,7 @@ void MainWindow::onClearClicked()
         QMutexLocker locker(&m_cloudMutex);
         if (m_accumulatedCloud) m_accumulatedCloud->clear();
     }
+    if (m_cloudHistory) m_cloudHistory->clear();
     if (m_viewer) {
         m_viewer->removeAllPointClouds();
         m_vtkWidget->renderWindow()->Render();
@@ -1643,6 +1717,59 @@ void MainWindow::onShowCloudClicked()
         }
     }
     m_vtkWidget->renderWindow()->Render();
+}
+
+// ========== Undo/Redo ==========
+void MainWindow::onUndo()
+{
+    QMutexLocker locker(&m_cloudMutex);
+    auto restored = m_cloudHistory->undo(m_accumulatedCloud);
+    if (!restored) {
+        statusBar()->showMessage("Нечего отменять", 2000);
+        return;
+    }
+    *m_accumulatedCloud = *restored;
+    emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+    locker.unlock();
+    updateViewer();
+    statusBar()->showMessage(
+        QString("Отменено: %1 (%2 точек)")
+            .arg(m_cloudHistory->redoDescription())
+            .arg(m_accumulatedCloud->size()),
+        3000);
+}
+
+void MainWindow::onRedo()
+{
+    QMutexLocker locker(&m_cloudMutex);
+    auto restored = m_cloudHistory->redo(m_accumulatedCloud);
+    if (!restored) {
+        statusBar()->showMessage("Нечего повторять", 2000);
+        return;
+    }
+    *m_accumulatedCloud = *restored;
+    emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
+    locker.unlock();
+    updateViewer();
+    statusBar()->showMessage(
+        QString("Повторено: %1 (%2 точек)")
+            .arg(m_cloudHistory->undoDescription())
+            .arg(m_accumulatedCloud->size()),
+        3000);
+}
+
+void MainWindow::updateUndoRedoActions()
+{
+    if (m_undoAction) {
+        m_undoAction->setEnabled(m_cloudHistory->canUndo());
+        const QString desc = m_cloudHistory->undoDescription();
+        m_undoAction->setText(desc.isEmpty() ? "Отменить" : QString("Отменить «%1»").arg(desc));
+    }
+    if (m_redoAction) {
+        m_redoAction->setEnabled(m_cloudHistory->canRedo());
+        const QString desc = m_cloudHistory->redoDescription();
+        m_redoAction->setText(desc.isEmpty() ? "Повторить" : QString("Повторить «%1»").arg(desc));
+    }
 }
 
 // ========== Настройки → Параметры… ==========

@@ -148,6 +148,7 @@ set(SOURCES
     src/export/ExportManager.cpp
     src/project/ProjectManager.cpp
     src/accel/GpuAccelerator.cpp
+    src/history/CloudHistory.cpp
 )
 
 if(ASTRA_HAVE_CUDA)
