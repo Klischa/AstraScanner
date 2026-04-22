@@ -141,15 +141,36 @@ cmake --build build
 
 ```
 src/
-├── main.cpp                     — точка входа, настройка message handler-а
-├── accel/                       — GpuAccelerator (CUDA/OpenMP), DepthToCloudKernel.cu
-├── capture/                     — AstraCamera (OpenNI2+UVC), CaptureWorker (поток захвата)
-├── calibration/                 — CameraCalibrator (шахматная доска → intrinsics)
-├── filters/                     — PointCloudFilters (SOR/ROR/Voxel/MagicWand, ICP merge, Poisson)
-├── settings/                    — SettingsManager (QSettings-обёртка, singleton)
-├── export/                      — ExportManager (PLY/PCD/STL/OBJ)
-├── project/                     — ProjectManager (project.json + scans/*.ply)
-└── gui/                         — MainWindow, LiveCloudWindow (QVTKOpenGLNativeWidget), SettingsDialog
+├── main.cpp                          — точка входа, message handler, инициализация GpuAccelerator
+│
+├── accel/                            — GPU / CPU ускорение
+│   ├── GpuAccelerator.h / .cpp       — абстракция CUDA / OpenMP / single-thread, выбор бэкенда
+│   ├── DepthToCloudKernel.h          — C-linkage интерфейс CUDA-ядра
+│   └── DepthToCloudKernel.cu         — CUDA-ядро depth+color → XYZ+RGB (компилируется только с -DASTRA_ENABLE_CUDA=ON)
+│
+├── capture/                          — захват с камеры
+│   ├── AstraCamera.h / .cpp          — OpenNI2 + UVC (OpenCV), emulation-mode без OpenNI2
+│   └── CaptureWorker.h / .cpp        — поток захвата, depth→cloud через GpuAccelerator
+│
+├── calibration/
+│   └── CameraCalibrator.h / .cpp     — калибровка по шахматной доске (OpenCV)
+│
+├── filters/
+│   └── PointCloudFilters.h / .cpp    — SOR, ROR, VoxelGrid, MagicWand, ICP merge, Poisson + ориентация нормалей (BFS, flip, custom viewpoint)
+│
+├── settings/
+│   └── SettingsManager.h / .cpp      — QSettings-обёртка (singleton), хранит все параметры приложения
+│
+├── export/
+│   └── ExportManager.h / .cpp        — экспорт облаков (PLY/PCD) и мешей (PLY/STL/OBJ)
+│
+├── project/
+│   └── ProjectManager.h / .cpp       — project.json + scans/*.ply, add/remove/rename/lazy load
+│
+└── gui/
+    ├── MainWindow.h / .cpp           — главное окно, 6 вкладок, поворотный стол, меню
+    ├── LiveCloudWindow.h / .cpp      — QVTKOpenGLNativeWidget, 3D-рендеринг облаков и мешей
+    └── SettingsDialog.h / .cpp       — единый диалог настроек (Ctrl+,): Сканирование, Фильтры, ICP, Poisson, Ускорение, Пути
 ```
 
 ---
