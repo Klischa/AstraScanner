@@ -68,12 +68,14 @@ if(ASTRA_ENABLE_OPENNI2)
         if(OPENNI2_LIBRARY)
             set(ASTRA_HAVE_OPENNI2 TRUE)
         else()
-            message(WARNING "ASTRA_ENABLE_OPENNI2=ON but OpenNI2 library not found; "
-                            "falling back to emulation-only build.")
+            message(FATAL_ERROR "ASTRA_ENABLE_OPENNI2=ON but OpenNI2 library not found at "
+                                "'${OPENNI2_ROOT}/libs'. Please set OPENNI2_ROOT correctly or "
+                                "pass -DASTRA_ENABLE_OPENNI2=OFF to build in emulation-only mode.")
         endif()
     else()
-        message(WARNING "ASTRA_ENABLE_OPENNI2=ON but OPENNI2_ROOT is not set or "
-                        "OpenNI.h not found; falling back to emulation-only build.")
+        message(FATAL_ERROR "ASTRA_ENABLE_OPENNI2=ON but OPENNI2_ROOT is not set or "
+                            "OpenNI.h not found. Please set -DOPENNI2_ROOT=<path-to-sdk> or "
+                            "pass -DASTRA_ENABLE_OPENNI2=OFF to build in emulation-only mode.")
     endif()
 endif()
 
