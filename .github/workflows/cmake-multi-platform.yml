@@ -24,7 +24,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # c_compiler должен быть top-level ключом матрицы: иначе оба `include`
+        # не добавляют комбинаций, а перезаписывают друг друга (GitHub Actions
+        # допускает перезапись «добавленных» значений), и в итоге запускается
+        # только одна джоба (последний include), а gcc-сборка молча пропадает.
         build_type: [Release]
+        c_compiler: [gcc, clang]
         include:
           - c_compiler: gcc
             cpp_compiler: g++
