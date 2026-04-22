@@ -7,6 +7,12 @@
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/surface/poisson.h>
 #include <pcl/common/io.h>
+#include <pcl/common/centroid.h>
+
+#include <Eigen/Core>
+#include <queue>
+#include <vector>
+#include <cmath>
 
 PointCloudFilters::PointCloudFilters(QObject *parent) : QObject(parent) {}
 
@@ -233,11 +239,23 @@ pcl::PolygonMesh PointCloudFilters::reconstructPoissonMesh(
     } else {
         ne.setKSearch(params.kNearest);
     }
-    // Примерный центр облака вместо (0,0,0): точки могут быть далеко от
-    // начала координат, иначе setViewPoint ориентирует нормали некорректно.
+    // View-point для ориентации нормалей. Если пользователь задал custom
+    // viewpoint — используем его как есть (например, чтобы указать «наружу»
+    // относительно замкнутой фигуры). Иначе — эвристика: centroid облака,
+    // смещённый на 1 м «к камере» вдоль Z.
     Eigen::Vector4f centroid;
     pcl::compute3DCentroid(*cloud, centroid);
-    ne.setViewPoint(centroid[0], centroid[1], centroid[2] - 1.0f);
+    float vpX = centroid[0];
+    float vpY = centroid[1];
+    float vpZ = centroid[2] - 1.0f;
+    if (params.useCustomViewpoint) {
+        vpX = params.viewpointX;
+        vpY = params.viewpointY;
+        vpZ = params.viewpointZ;
+        qInfo() << "[Poisson] Using custom viewpoint ("
+                << vpX << vpY << vpZ << ")";
+    }
+    ne.setViewPoint(vpX, vpY, vpZ);
     ne.compute(*normals);
 
     if (normals->size() != cloud->size()) {
@@ -245,7 +263,106 @@ pcl::PolygonMesh PointCloudFilters::reconstructPoissonMesh(
                    << "normals for" << cloud->size() << "points";
         return mesh;
     }
-    emit progressUpdated(30);
+    emit progressUpdated(25);
+
+    // Опциональная согласованная ориентация нормалей: BFS по k-nearest от
+    // сида, ближайшего к view-point. Разворачиваем нормали соседей так,
+    // чтобы dot(n_parent, n_child) ≥ 0. Сид-точку ориентируем «наружу»
+    // относительно view-point, то есть нормалью в сторону view-point.
+    if (params.consistentOrientation) {
+        const int k = std::max(3, params.orientationKNeighbors);
+        pcl::KdTreeFLANN<pcl::PointXYZRGB> orientTree;
+        orientTree.setInputCloud(cloud);
+
+        // Ищем ближайшую к view-point точку в облаке — это сид.
+        pcl::PointXYZRGB vpPoint;
+        vpPoint.x = vpX; vpPoint.y = vpY; vpPoint.z = vpZ;
+        std::vector<int> seedIdx(1);
+        std::vector<float> seedDist(1);
+        if (orientTree.nearestKSearch(vpPoint, 1, seedIdx, seedDist) < 1) {
+            qWarning() << "[Poisson] Consistent orientation: seed search failed";
+        } else {
+            const int seed = seedIdx[0];
+
+            // Ориентируем сид нормалью «в сторону view-point».
+            Eigen::Vector3f toVp(
+                vpX - cloud->points[seed].x,
+                vpY - cloud->points[seed].y,
+                vpZ - cloud->points[seed].z);
+            Eigen::Vector3f nSeed(
+                normals->points[seed].normal_x,
+                normals->points[seed].normal_y,
+                normals->points[seed].normal_z);
+            if (toVp.norm() > 1e-6f && nSeed.dot(toVp) < 0.0f) {
+                normals->points[seed].normal_x *= -1.0f;
+                normals->points[seed].normal_y *= -1.0f;
+                normals->points[seed].normal_z *= -1.0f;
+            }
+
+            std::vector<bool> visited(cloud->size(), false);
+            std::queue<int> bfs;
+            bfs.push(seed);
+            visited[seed] = true;
+
+            std::vector<int> nbIdx(k);
+            std::vector<float> nbDist(k);
+
+            std::size_t processed = 0;
+            const std::size_t total = cloud->size();
+            while (!bfs.empty()) {
+                int idx = bfs.front(); bfs.pop();
+                ++processed;
+
+                int found = orientTree.nearestKSearch(
+                    cloud->points[idx], k, nbIdx, nbDist);
+                if (found <= 0) continue;
+
+                const Eigen::Vector3f parent(
+                    normals->points[idx].normal_x,
+                    normals->points[idx].normal_y,
+                    normals->points[idx].normal_z);
+
+                for (int i = 0; i < found; ++i) {
+                    const int n = nbIdx[i];
+                    if (n < 0 || static_cast<std::size_t>(n) >= cloud->size()) continue;
+                    if (visited[n]) continue;
+                    visited[n] = true;
+
+                    Eigen::Vector3f child(
+                        normals->points[n].normal_x,
+                        normals->points[n].normal_y,
+                        normals->points[n].normal_z);
+                    if (parent.dot(child) < 0.0f) {
+                        normals->points[n].normal_x *= -1.0f;
+                        normals->points[n].normal_y *= -1.0f;
+                        normals->points[n].normal_z *= -1.0f;
+                    }
+                    bfs.push(n);
+                }
+
+                // Периодический прогресс (25 → 35) — BFS обычно занимает
+                // заметное время на больших облаках.
+                if ((processed & 0x3FFF) == 0 && total > 0) {
+                    int pct = 25 + static_cast<int>(10 * processed / total);
+                    emit progressUpdated(std::min(35, pct));
+                }
+            }
+            qInfo() << "[Poisson] Consistent orientation propagated from seed"
+                    << seed << "over" << processed << "points";
+        }
+    }
+
+    // Явная инверсия всех нормалей — последний шаг, применяется поверх
+    // consistent-orientation, если Poisson всё равно строит меш «наизнанку».
+    if (params.flipNormals) {
+        for (auto &n : normals->points) {
+            n.normal_x *= -1.0f;
+            n.normal_y *= -1.0f;
+            n.normal_z *= -1.0f;
+        }
+        qInfo() << "[Poisson] Normals inverted (flipNormals=true)";
+    }
+    emit progressUpdated(35);
 
     // 2. Склеиваем XYZRGB + Normal → PointNormal (Poisson в PCL ожидает его).
     pcl::PointCloud<pcl::PointNormal>::Ptr cloudWithNormals(new pcl::PointCloud<pcl::PointNormal>);

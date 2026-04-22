@@ -33,6 +33,26 @@ public:
         // radius search (см. kNearest).
         double normalSearchRadius = 0.01;
         int kNearest = 20;
+
+        // --- Ориентация нормалей ---
+        // По умолчанию ориентация считается через view-point ≈ centroid - 1 м
+        // по оси Z (см. computeNormals в .cpp). Для сильно замкнутых объектов
+        // этот эвристический view-point может давать противоположные нормали;
+        // флаги ниже позволяют задать ориентацию вручную.
+        bool useCustomViewpoint = false;
+        float viewpointX = 0.0f;
+        float viewpointY = 0.0f;
+        float viewpointZ = 0.0f;
+        // Инвертировать все нормали после оценки (полезно, если Poisson-меш
+        // получился «вывернут наизнанку»).
+        bool flipNormals = false;
+        // Согласованная ориентация через BFS-propagation по k-nearest соседям:
+        // стартуем с точки, ближайшей к view-point, и разворачиваем нормали
+        // так, чтобы соседние были сонаправлены. Помогает для замкнутых
+        // объектов, где единый view-point не даёт корректной ориентации.
+        // Работает только на одной связной компоненте облака.
+        bool consistentOrientation = false;
+        int orientationKNeighbors = 10;
     };
 
     explicit PointCloudFilters(QObject *parent = nullptr);
