@@ -11,6 +11,11 @@ constexpr const char *kSorMeanK          = "filters/sorMeanK";
 constexpr const char *kSorStddev         = "filters/sorStddevMul";
 constexpr const char *kRorRadius         = "filters/rorRadius";
 constexpr const char *kRorMinNeighbors   = "filters/rorMinNeighbors";
+constexpr const char *kPoissonDepth      = "poisson/depth";
+constexpr const char *kPoissonPointWt    = "poisson/pointWeight";
+constexpr const char *kPoissonSamples    = "poisson/samplesPerNode";
+constexpr const char *kPoissonNormalRad  = "poisson/normalRadius";
+constexpr const char *kPoissonKNearest   = "poisson/kNearest";
 constexpr const char *kProjectsDir       = "paths/projectsDirectory";
 constexpr const char *kLastExportDir     = "paths/lastExportDirectory";
 }
@@ -109,6 +114,56 @@ int SettingsManager::rorMinNeighbors() const
 void SettingsManager::setRorMinNeighbors(int n)
 {
     setValue(kRorMinNeighbors, n);
+}
+
+int SettingsManager::poissonDepth() const
+{
+    return m_settings.value(kPoissonDepth, 9).toInt();
+}
+
+void SettingsManager::setPoissonDepth(int depth)
+{
+    setValue(kPoissonDepth, depth);
+}
+
+double SettingsManager::poissonPointWeight() const
+{
+    return m_settings.value(kPoissonPointWt, 4.0).toDouble();
+}
+
+void SettingsManager::setPoissonPointWeight(double w)
+{
+    setValue(kPoissonPointWt, w);
+}
+
+double SettingsManager::poissonSamplesPerNode() const
+{
+    return m_settings.value(kPoissonSamples, 1.5).toDouble();
+}
+
+void SettingsManager::setPoissonSamplesPerNode(double n)
+{
+    setValue(kPoissonSamples, n);
+}
+
+double SettingsManager::poissonNormalRadius() const
+{
+    return m_settings.value(kPoissonNormalRad, 0.01).toDouble();
+}
+
+void SettingsManager::setPoissonNormalRadius(double meters)
+{
+    setValue(kPoissonNormalRad, meters);
+}
+
+int SettingsManager::poissonKNearest() const
+{
+    return m_settings.value(kPoissonKNearest, 20).toInt();
+}
+
+void SettingsManager::setPoissonKNearest(int k)
+{
+    setValue(kPoissonKNearest, k);
 }
 
 QString SettingsManager::projectsDirectory() const

@@ -15,7 +15,11 @@
 #include <pcl/point_types.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/PolygonMesh.h>
+#include <QFutureWatcher>
 #include <opencv2/opencv.hpp>
+
+#include "../filters/PointCloudFilters.h"
 
 QT_BEGIN_NAMESPACE
 class QTabWidget;
@@ -80,6 +84,11 @@ private slots:
     void onScansListDoubleClicked(QListWidgetItem *item);
     void refreshScansList();
 
+    // --- Poisson-реконструкция ---
+    void onReconstructMeshClicked(const PointCloudFilters::PoissonParams &params);
+    void onShowCloudClicked();
+    void onPoissonFinished();
+
 private:
     void setupUI();
     void setupVisualizer();
@@ -141,9 +150,17 @@ private:
     ExportManager *m_exporter = nullptr;
     QListWidget *m_scansList = nullptr;
     QLabel *m_projectStatusLabel = nullptr;
-    // Последний реконструированный меш (Poisson). Пока пустой — STL/OBJ
-    // экспорт недоступен, об этом сообщаем пользователю.
+    // Последний реконструированный меш (Poisson). Пустой, пока не нажата
+    // кнопка «Построить меш» в вкладке «Обработка» или до первой успешной
+    // реконструкции.
     pcl::PolygonMesh m_lastMesh;
+    QProgressBar *m_poissonProgress = nullptr;
+    QLabel *m_meshStatusLabel = nullptr;
+    // Идентификатор меша в PCLVisualizer. Пустая строка = меш не отображён.
+    QString m_meshViewerId;
+    // Watcher для QtConcurrent::run — чтобы не потерять future и корректно
+    // эмитить onPoissonFinished() в GUI-потоке.
+    QFutureWatcher<pcl::PolygonMesh> *m_poissonWatcher = nullptr;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений
