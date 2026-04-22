@@ -238,3 +238,12 @@ if(WIN32)
         )
     endif()
 endif()
+
+# --- Unit-тесты (опционально) ---
+# Включаются через -DASTRA_BUILD_TESTS=ON. Требуется GTest (через vcpkg
+# или системный пакет: apt install libgtest-dev).
+option(ASTRA_BUILD_TESTS "Build unit tests (requires GTest)" OFF)
+if(ASTRA_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

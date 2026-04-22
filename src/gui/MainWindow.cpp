@@ -941,6 +941,18 @@ void MainWindow::setupUI()
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPauseClicked);
     connect(m_stopBtn, &QPushButton::clicked, this, &MainWindow::onStopClicked);
     connect(m_clearBtn, &QPushButton::clicked, this, &MainWindow::onClearClicked);
+
+    // --- Горячие клавиши ---
+    m_scanBtn->setShortcut(QKeySequence("F5"));
+    m_scanBtn->setToolTip("Начать сканирование (F5)");
+    m_stopBtn->setShortcut(QKeySequence("F6"));
+    m_stopBtn->setToolTip("Остановить (F6)");
+    m_pauseBtn->setShortcut(QKeySequence("Space"));
+    m_pauseBtn->setToolTip("Пауза / Продолжить (Space)");
+    m_clearBtn->setShortcut(QKeySequence("Delete"));
+    m_clearBtn->setToolTip("Очистить облако (Delete)");
+    m_previewBtn->setShortcut(QKeySequence("F4"));
+    m_previewBtn->setToolTip("Превью (F4)");
 }
 
 void MainWindow::setupVisualizer()
@@ -1544,6 +1556,33 @@ void MainWindow::onReconstructMeshClicked(const PointCloudFilters::PoissonParams
         }
         // Копия, чтобы не держать mutex пока Poisson работает секунды-минуты.
         snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+
+    // Прогрессивная Poisson: для очень больших облаков предлагаем
+    // автоматическую предварительную децимацию, чтобы не исчерпать RAM.
+    constexpr size_t kLargeCloudThreshold = 500000;
+    if (snapshot->size() > kLargeCloudThreshold) {
+        auto answer = QMessageBox::question(this, "Большое облако",
+            QString("Облако содержит %1 точек. Poisson с depth=%2 может потребовать "
+                    "много памяти и времени.\n\n"
+                    "Выполнить предварительную VoxelGrid-децимацию до ~%3 точек?\n"
+                    "(Нет = использовать как есть)")
+                .arg(snapshot->size()).arg(params.depth).arg(kLargeCloudThreshold),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+        if (answer == QMessageBox::Cancel) return;
+        if (answer == QMessageBox::Yes) {
+            // Подбираем leaf size чтобы получить ~kLargeCloudThreshold точек.
+            // Грубая эвристика: leaf ≈ (volume / target)^(1/3).
+            const float ratio = static_cast<float>(snapshot->size()) / kLargeCloudThreshold;
+            const float leaf = 0.002f * std::cbrt(ratio);
+            qInfo() << "[Poisson] Pre-decimation: leaf =" << leaf
+                    << ", before =" << snapshot->size();
+            auto decimated = m_filters->applyVoxelGrid(snapshot, leaf);
+            if (decimated && !decimated->empty()) {
+                snapshot = decimated;
+                qInfo() << "[Poisson] After decimation:" << snapshot->size() << "points";
+            }
+        }
     }
 
     if (m_poissonWatcher && m_poissonWatcher->isRunning()) {
