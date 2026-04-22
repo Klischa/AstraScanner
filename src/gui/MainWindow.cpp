@@ -1,7 +1,6 @@
 #include "MainWindow.h"
 #include "../capture/CaptureWorker.h"
 #include "../calibration/CameraCalibrator.h"
-#include "LiveCloudWindow.h"
 #include "SettingsDialog.h"
 #include "LassoSelector.h"
 #include "../filters/PointCloudFilters.h"
@@ -60,7 +59,6 @@ MainWindow::MainWindow(QWidget* parent)
     std::error_code ec;
     std::filesystem::create_directories("data", ec);
 
-    m_liveCloudWindow = new LiveCloudWindow(this);
     m_filters = new PointCloudFilters(this);
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
@@ -226,31 +224,7 @@ void MainWindow::setupUI()
     distanceLayout->addWidget(distanceHintLabel);
 
     homeLayout->addWidget(distanceGroup);
-    
-    QPushButton *liveCloudBtn = new QPushButton("📊 Live Cloud Viewer", this);
-    liveCloudBtn->setCheckable(true);
-    liveCloudBtn->setMaximumWidth(200);
-    homeLayout->addWidget(liveCloudBtn, 0, Qt::AlignHCenter);
 
-    connect(liveCloudBtn, &QPushButton::toggled, this, [this, liveCloudBtn](bool checked) {
-        if (checked) {
-            m_liveCloudWindow->show();
-            m_liveCloudWindow->startUpdating();
-            liveCloudBtn->setText("📊 Live Cloud Viewer (ON)");
-        } else {
-            m_liveCloudWindow->stopUpdating();
-            m_liveCloudWindow->hide();
-            liveCloudBtn->setText("📊 Live Cloud Viewer");
-        }
-    });
-
-    connect(m_liveCloudWindow, &LiveCloudWindow::cloudRequested, this, [this]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (m_accumulatedCloud && !m_accumulatedCloud->empty()) {
-            m_liveCloudWindow->updateCloud(m_accumulatedCloud);
-        }
-    });
-    
     homeLayout->addStretch();
 
     connect(applyColormapBtn, &QPushButton::clicked, this, [this, colormapCombo]() {
@@ -1708,7 +1682,7 @@ void MainWindow::onShowSettingsDialog()
     SettingsDialog dlg(this);
     dlg.exec();
     // SettingsManager::settingsChanged уже эмитится при каждой записи,
-    // так что подписчики (LiveCloudWindow и т.п.) получат обновления
+    // так что подписчики получат обновления
     // автоматически. Существующие UI-виджеты на вкладках читают QSettings
     // только при запуске — при следующем взаимодействии они подхватят
     // новые значения через соответствующие click-handler'ы.

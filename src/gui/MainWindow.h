@@ -37,7 +37,6 @@ QT_END_NAMESPACE
 
 class CaptureWorker;
 class CameraCalibrator;
-class LiveCloudWindow;
 class LassoSelector;
 
 class vtkRenderer;
@@ -170,7 +169,6 @@ private:
     QPushButton *m_calibResetBtn = nullptr;
     QLabel *m_calibRgbLabel = nullptr;
 
-    LiveCloudWindow *m_liveCloudWindow = nullptr;
     PointCloudFilters *m_filters = nullptr;
 
     QTextEdit *m_logTextEdit = nullptr;
