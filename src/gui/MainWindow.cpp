@@ -3,10 +3,14 @@
 #include "../calibration/CameraCalibrator.h"
 #include "LiveCloudWindow.h"
 #include "SettingsDialog.h"
+#include "LassoSelector.h"
 #include "../filters/PointCloudFilters.h"
 #include "../settings/SettingsManager.h"
 #include "../export/ExportManager.h"
 #include "../project/ProjectManager.h"
+
+#include <vtkRenderer.h>
+#include <vtkCamera.h>
 
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -441,6 +445,49 @@ void MainWindow::setupUI()
 
     processingLayout->addWidget(filterGroup);
 
+    // --- Ручное редактирование облака (лассо) ---
+    // Позволяет нарисовать произвольный контур во вьюере и удалить/оставить
+    // только точки, проекция которых в экранных координатах попала в
+    // полигон. Полезно для локальных выбросов, которые не хватает SOR/ROR —
+    // например, стол, задний фон, блики. Перед каждой операцией делается
+    // snapshot облака; «Отменить» возвращает последний.
+    QGroupBox *lassoGroup = new QGroupBox("Ручное редактирование (лассо)", this);
+    QVBoxLayout *lassoLayout = new QVBoxLayout(lassoGroup);
+
+    QLabel *lassoHint = new QLabel(
+        "Нарисуйте контур во вьюере левой кнопкой мыши. Esc — отменить.", this);
+    lassoHint->setWordWrap(true);
+    lassoLayout->addWidget(lassoHint);
+
+    QHBoxLayout *lassoBtnRow = new QHBoxLayout();
+    m_lassoDeleteBtn = new QPushButton("Удалить выделенное", this);
+    m_lassoDeleteBtn->setToolTip(
+        "Удалить из текущего облака все точки, попавшие в нарисованный контур.");
+    m_lassoKeepBtn = new QPushButton("Оставить только выделенное", this);
+    m_lassoKeepBtn->setToolTip(
+        "Оставить только точки внутри контура; остальное — удалить.");
+    m_undoEditBtn = new QPushButton("Отменить правку", this);
+    m_undoEditBtn->setToolTip("Вернуть облако в состояние до последней правки.");
+    m_undoEditBtn->setEnabled(false);
+
+    lassoBtnRow->addWidget(m_lassoDeleteBtn);
+    lassoBtnRow->addWidget(m_lassoKeepBtn);
+    lassoBtnRow->addWidget(m_undoEditBtn);
+    lassoBtnRow->addStretch();
+    lassoLayout->addLayout(lassoBtnRow);
+
+    m_lassoStatusLabel = new QLabel("Готов к редактированию", this);
+    lassoLayout->addWidget(m_lassoStatusLabel);
+
+    processingLayout->addWidget(lassoGroup);
+
+    connect(m_lassoDeleteBtn, &QPushButton::clicked,
+            this, &MainWindow::onLassoDeleteClicked);
+    connect(m_lassoKeepBtn, &QPushButton::clicked,
+            this, &MainWindow::onLassoKeepClicked);
+    connect(m_undoEditBtn, &QPushButton::clicked,
+            this, &MainWindow::onUndoEditClicked);
+
     QGroupBox* registrationGroup = new QGroupBox("Регистрация сканов (ICP)", this);
     QVBoxLayout* registrationLayout = new QVBoxLayout(registrationGroup);
 
@@ -853,6 +900,16 @@ void MainWindow::setupVisualizer()
     m_viewer->initCameraParameters();
     m_viewer->setCameraPosition(0, 0, -2, 0, 0, 1, 0, -1, 0);
     m_viewer->getRenderWindow()->SetDesiredUpdateRate(5.0);
+
+    // Сохраняем renderer под рукой — понадобится LassoSelector для
+    // проецирования точек облака в display-координаты.
+    m_vtkRenderer = renderer;
+    m_lasso = new LassoSelector(m_vtkWidget, m_vtkRenderer, this);
+    connect(m_lasso, &LassoSelector::lassoCompleted,
+            this, &MainWindow::onLassoCompleted);
+    connect(m_lasso, &LassoSelector::lassoCanceled,
+            this, &MainWindow::onLassoCanceled);
+
     qDebug() << "Visualizer setup complete";
 }
 
@@ -1757,4 +1814,211 @@ void MainWindow::onTurntableTick()
                     "Перейдите на вкладку «Обработка» → «Объединить все сканы проекта», "
                     "чтобы склеить их через ICP.").arg(m_turntableCaptured));
     }
+}
+// ========== Ручное редактирование облака (лассо) ==========
+namespace {
+
+// Лимит снимков в undo-стеке. На больших облаках (несколько М точек)
+// каждый снимок весит десятки МБ, 10 штук = верхний край «допустимого».
+constexpr std::size_t kMaxEditUndo = 10;
+
+} // namespace
+
+void MainWindow::onLassoDeleteClicked()
+{
+    if (!m_lasso) return;
+    if (m_lasso->isActive()) {
+        // Повторный клик — воспринимаем как отмену.
+        m_lasso->stop();
+        m_lassoOp = LassoOp::None;
+        m_lassoStatusLabel->setText("Лассо отменено");
+        return;
+    }
+
+    QMutexLocker locker(&m_cloudMutex);
+    if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+        locker.unlock();
+        QMessageBox::information(this, "Лассо",
+            "Текущее облако пустое — нечего редактировать.");
+        return;
+    }
+    locker.unlock();
+
+    m_lassoOp = LassoOp::Delete;
+    m_lassoStatusLabel->setText(
+        "Режим: удалить выделенное. Обведите область во вьюере, Esc — отмена.");
+    m_lasso->start();
+}
+
+void MainWindow::onLassoKeepClicked()
+{
+    if (!m_lasso) return;
+    if (m_lasso->isActive()) {
+        m_lasso->stop();
+        m_lassoOp = LassoOp::None;
+        m_lassoStatusLabel->setText("Лассо отменено");
+        return;
+    }
+
+    QMutexLocker locker(&m_cloudMutex);
+    if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+        locker.unlock();
+        QMessageBox::information(this, "Лассо",
+            "Текущее облако пустое — нечего редактировать.");
+        return;
+    }
+    locker.unlock();
+
+    m_lassoOp = LassoOp::Keep;
+    m_lassoStatusLabel->setText(
+        "Режим: оставить выделенное. Обведите область во вьюере, Esc — отмена.");
+    m_lasso->start();
+}
+
+void MainWindow::onLassoCanceled()
+{
+    m_lassoOp = LassoOp::None;
+    if (m_lassoStatusLabel) m_lassoStatusLabel->setText("Лассо отменено");
+}
+
+void MainWindow::onLassoCompleted(const QPolygonF &polygonWidget)
+{
+    if (m_lassoOp == LassoOp::None || !m_vtkRenderer || !m_vtkWidget) {
+        m_lassoOp = LassoOp::None;
+        return;
+    }
+    if (polygonWidget.size() < 3) {
+        m_lassoOp = LassoOp::None;
+        if (m_lassoStatusLabel) m_lassoStatusLabel->setText(
+            "Слишком маленький контур, операция отменена");
+        return;
+    }
+
+    // Переводим полигон в display-систему VTK (физические пиксели,
+    // origin — низ-лево), чтобы он совпал с координатной системой, в
+    // которой мы будем проецировать точки облака.
+    const double dpr = m_vtkWidget->devicePixelRatioF();
+    const double wLogicalH = m_vtkWidget->height();
+    QPolygonF polyDisplay;
+    polyDisplay.reserve(polygonWidget.size());
+    for (const QPointF &p : polygonWidget) {
+        polyDisplay << QPointF(p.x() * dpr, (wLogicalH - p.y()) * dpr);
+    }
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+            m_lassoOp = LassoOp::None;
+            return;
+        }
+        // Снимок до правки — для undo.
+        snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+
+    // Проецируем точки по текущей камере/viewport. WorldToDisplay не
+    // потокобезопасен на общем renderer, так что работаем в GUI-потоке
+    // (этот слот и так сюда приходит).
+    const std::size_t N = snapshot->size();
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr result(new pcl::PointCloud<pcl::PointXYZRGB>);
+    result->reserve(N);
+
+    const bool keep = (m_lassoOp == LassoOp::Keep);
+    std::size_t removed = 0;
+
+    for (std::size_t i = 0; i < N; ++i) {
+        const auto &pt = snapshot->points[i];
+        if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
+            // Невалидные точки в любом случае отбрасываем — незачем их
+            // тащить через правку.
+            ++removed;
+            continue;
+        }
+        double world[4] = {pt.x, pt.y, pt.z, 1.0};
+        m_vtkRenderer->SetWorldPoint(world);
+        m_vtkRenderer->WorldToDisplay();
+        double disp[3];
+        m_vtkRenderer->GetDisplayPoint(disp);
+
+        const QPointF d(disp[0], disp[1]);
+        const bool inside = polyDisplay.containsPoint(d, Qt::OddEvenFill);
+        const bool accept = keep ? inside : !inside;
+        if (accept) {
+            result->push_back(pt);
+        } else {
+            ++removed;
+        }
+    }
+
+    if (result->size() == N) {
+        m_lassoOp = LassoOp::None;
+        if (m_lassoStatusLabel) m_lassoStatusLabel->setText(
+            "В полигон не попала ни одна точка — облако не изменилось");
+        return;
+    }
+
+    result->width = result->size();
+    result->height = 1;
+    result->is_dense = true;
+
+    // Push snapshot → undo stack (ограниченный).
+    m_editUndo.push_back(snapshot);
+    while (m_editUndo.size() > kMaxEditUndo) {
+        m_editUndo.pop_front();
+    }
+    if (m_undoEditBtn) m_undoEditBtn->setEnabled(true);
+
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud) {
+            m_accumulatedCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+        }
+        *m_accumulatedCloud = *result;
+    }
+    emit cloudSizeChanged(static_cast<int>(result->size()));
+
+    // Если в вьюере висит меш — убираем, чтобы результат правки было видно.
+    if (m_viewer && !m_meshViewerId.isEmpty()) {
+        m_viewer->removePolygonMesh(m_meshViewerId.toStdString());
+        m_meshViewerId.clear();
+    }
+    updateViewer();
+
+    if (m_lassoStatusLabel) {
+        m_lassoStatusLabel->setText(
+            QString("%1 %2 точек, осталось %3")
+                .arg(keep ? "Оставлено" : "Удалено")
+                .arg(removed)
+                .arg(result->size()));
+    }
+    qInfo() << "[Lasso]" << (keep ? "keep" : "delete")
+            << "removed" << removed << "points; result size =" << result->size();
+    m_lassoOp = LassoOp::None;
+}
+
+void MainWindow::onUndoEditClicked()
+{
+    if (m_editUndo.empty()) {
+        if (m_lassoStatusLabel) m_lassoStatusLabel->setText("Нечего отменять");
+        if (m_undoEditBtn) m_undoEditBtn->setEnabled(false);
+        return;
+    }
+    auto snap = m_editUndo.back();
+    m_editUndo.pop_back();
+
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud) {
+            m_accumulatedCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+        }
+        *m_accumulatedCloud = *snap;
+    }
+    emit cloudSizeChanged(static_cast<int>(snap->size()));
+    updateViewer();
+
+    if (m_undoEditBtn) m_undoEditBtn->setEnabled(!m_editUndo.empty());
+    if (m_lassoStatusLabel) m_lassoStatusLabel->setText(
+        QString("Правка отменена, восстановлено %1 точек").arg(snap->size()));
+    qInfo() << "[Lasso] undo: restored" << snap->size() << "points, undo stack ="
+            << m_editUndo.size();
 }

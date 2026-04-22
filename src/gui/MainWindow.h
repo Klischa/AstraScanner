@@ -17,7 +17,12 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/PolygonMesh.h>
 #include <QFutureWatcher>
+#include <QPolygonF>
 #include <opencv2/opencv.hpp>
+
+#include <deque>
+
+#include <vtkSmartPointer.h>
 
 #include "../filters/PointCloudFilters.h"
 
@@ -33,6 +38,9 @@ QT_END_NAMESPACE
 class CaptureWorker;
 class CameraCalibrator;
 class LiveCloudWindow;
+class LassoSelector;
+
+class vtkRenderer;
 class PointCloudFilters;
 class ProjectManager;
 class ExportManager;
@@ -103,6 +111,13 @@ private slots:
     // --- Поворотный стол / авто-сохранение по таймеру ---
     void onTurntableToggled(bool enabled);
     void onTurntableTick();
+
+    // --- Ручное редактирование облака (лассо) ---
+    void onLassoDeleteClicked();
+    void onLassoKeepClicked();
+    void onLassoCompleted(const QPolygonF &polygonWidget);
+    void onLassoCanceled();
+    void onUndoEditClicked();
 
 private:
     void setupUI();
@@ -203,6 +218,20 @@ private:
     QSpinBox        *m_turntableCountSpin = nullptr;
     QLabel          *m_turntableStatusLabel = nullptr;
     int              m_turntableCaptured = 0;
+
+    // Лассо-редактирование облака точек
+    vtkSmartPointer<vtkRenderer>  m_vtkRenderer;  // дубль из setupVisualizer
+    LassoSelector   *m_lasso = nullptr;
+    QPushButton     *m_lassoDeleteBtn = nullptr;
+    QPushButton     *m_lassoKeepBtn = nullptr;
+    QPushButton     *m_undoEditBtn = nullptr;
+    QLabel          *m_lassoStatusLabel = nullptr;
+    enum class LassoOp { None, Delete, Keep };
+    LassoOp          m_lassoOp = LassoOp::None;
+    // Стек снимков m_accumulatedCloud до каждой деструктивной операции
+    // (лассо delete/keep, в перспективе — другие фильтры). Ограничен, чтобы
+    // не съесть память на больших облаках.
+    std::deque<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> m_editUndo;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений
