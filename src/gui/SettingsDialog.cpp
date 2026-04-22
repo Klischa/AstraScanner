@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include "../settings/SettingsManager.h"
+#include "../accel/GpuAccelerator.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -172,6 +173,42 @@ void SettingsDialog::buildUi()
 
     tabs->addTab(poissonPage, "Poisson");
 
+    // ---- Вкладка «Ускорение» ----
+    auto *accelPage = new QWidget(this);
+    auto *accelLayout = new QVBoxLayout(accelPage);
+
+    auto *accelInfoGroup = new QGroupBox("Текущий бэкенд", accelPage);
+    auto *accelInfoLayout = new QFormLayout(accelInfoGroup);
+    const auto &accel = GpuAccelerator::instance();
+    accelInfoLayout->addRow("Бэкенд:", new QLabel(accel.backendName(), this));
+    accelInfoLayout->addRow("GPU / CPU:", new QLabel(accel.gpuInfo(), this));
+    if (accel.isCudaAvailable()) {
+        accelInfoLayout->addRow("CUDA:", new QLabel("Доступна ✓", this));
+    } else {
+        accelInfoLayout->addRow("CUDA:", new QLabel("Недоступна (нет NVIDIA GPU или собрано без -DASTRA_ENABLE_CUDA=ON)", this));
+    }
+    accelLayout->addWidget(accelInfoGroup);
+
+    auto *ompGroup = new QGroupBox("OpenMP (параллелизация CPU)", accelPage);
+    auto *ompForm = new QFormLayout(ompGroup);
+    m_ompThreads = new QSpinBox(this);
+    m_ompThreads->setRange(0, 128);
+    m_ompThreads->setSpecialValueText("Авто");
+    m_ompThreads->setToolTip(
+        "Число потоков OpenMP для конвертации depth→cloud и других параллельных операций.\n"
+        "0 = автоматически (по числу логических ядер процессора).\n"
+        "Ryzen 7 8700G: рекомендуется 0 (авто) или 16.");
+    m_ompThreads->setValue(accel.ompThreadCount());
+    ompForm->addRow("Потоков OpenMP:", m_ompThreads);
+    if (!accel.isOpenMPAvailable()) {
+        m_ompThreads->setEnabled(false);
+        ompForm->addRow("", new QLabel("⚠ OpenMP не найден при сборке. Параллелизация отключена.", this));
+    }
+    accelLayout->addWidget(ompGroup);
+
+    accelLayout->addStretch();
+    tabs->addTab(accelPage, "Ускорение");
+
     // ---- Вкладка «Пути» ----
     auto *pathsPage = new QWidget(this);
     auto *pathsLayout = new QFormLayout(pathsPage);
@@ -266,6 +303,9 @@ void SettingsDialog::saveToSettings()
     s.setProjectsDirectory(m_projectsDir->text());
     s.setLastExportDirectory(m_exportDir->text());
 
+    // Ускорение: применяем число потоков OpenMP немедленно.
+    GpuAccelerator::instance().setOmpThreadCount(m_ompThreads->value());
+
     s.sync();
 }
 
@@ -301,6 +341,7 @@ void SettingsDialog::onResetDefaults()
     m_poissonSamples->setValue(kDefaultPoissonSamples);
     m_poissonNormalRadius->setValue(kDefaultPoissonNormalRad);
     m_poissonKNearest->setValue(kDefaultPoissonKNearest);
+    m_ompThreads->setValue(0); // 0 = авто
     // Пути не сбрасываем — это пользовательский выбор, а не «дефолт»,
     // сохранённый в исходниках.
 }

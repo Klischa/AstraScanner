@@ -8,6 +8,7 @@
 #include <QMetaObject>
 #include <cstdlib>
 #include "gui/MainWindow.h"
+#include "accel/GpuAccelerator.h"
 
 static QFile g_logFile;
 
@@ -79,6 +80,11 @@ int main(int argc, char *argv[])
     }
 
     qInstallMessageHandler(fileMessageHandler);
+
+    // Инициализация GPU/CPU-ускорения. Определяет доступные бэкенды:
+    // CUDA (NVIDIA), OpenMP (любой CPU, включая AMD Ryzen 8700G), или
+    // single-thread fallback. Результат логируется.
+    GpuAccelerator::instance().initialize();
 
     MainWindow w;
     w.show();

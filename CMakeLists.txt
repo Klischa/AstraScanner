@@ -6,6 +6,36 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_definitions(-DNOMINMAX)
 
+# --- GPU-ускорение (опционально) ---
+# CUDA: для NVIDIA GPU — ускоряет конвертацию depth→cloud и VoxelGrid.
+# На AMD (Ryzen 7 8700G / Radeon 780M) CUDA недоступна; вместо неё
+# используется OpenMP-параллелизация (работает на любом CPU).
+option(ASTRA_ENABLE_CUDA "Build with CUDA GPU acceleration (NVIDIA only)" OFF)
+
+set(ASTRA_HAVE_CUDA FALSE)
+if(ASTRA_ENABLE_CUDA)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        find_package(CUDAToolkit REQUIRED)
+        set(ASTRA_HAVE_CUDA TRUE)
+        message(STATUS "CUDA enabled: ${CMAKE_CUDA_COMPILER_VERSION}")
+    else()
+        message(FATAL_ERROR "ASTRA_ENABLE_CUDA=ON but no CUDA compiler found. "
+                            "Install CUDA Toolkit or pass -DASTRA_ENABLE_CUDA=OFF.")
+    endif()
+endif()
+
+# OpenMP: ускорение на CPU (Ryzen 8700G: 8 ядер / 16 потоков).
+# Используется PCL (NormalEstimationOMP) и наш код конвертации depth→cloud.
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP enabled: ${OpenMP_CXX_VERSION}")
+else()
+    message(WARNING "OpenMP not found — parallel CPU paths will be single-threaded.")
+endif()
+
 # Allow overriding the vcpkg toolchain via -DCMAKE_TOOLCHAIN_FILE=... or VCPKG_ROOT env var.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     if(DEFINED ENV{VCPKG_ROOT})
@@ -117,7 +147,12 @@ set(SOURCES
     src/settings/SettingsManager.cpp
     src/export/ExportManager.cpp
     src/project/ProjectManager.cpp
+    src/accel/GpuAccelerator.cpp
 )
+
+if(ASTRA_HAVE_CUDA)
+    list(APPEND SOURCES src/accel/DepthToCloudKernel.cu)
+endif()
 
 # На Windows GUI-приложение скрывает консоль (WIN32_EXECUTABLE / /SUBSYSTEM:WINDOWS);
 # на Linux/macOS этот флаг ничего полезного не даёт.
@@ -129,6 +164,12 @@ endif()
 
 if(ASTRA_HAVE_OPENNI2)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ASTRA_HAVE_OPENNI2)
+endif()
+if(ASTRA_HAVE_CUDA)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ASTRA_HAVE_CUDA)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_ARCHITECTURES "50;60;70;75;80;86;89")
 endif()
 
 target_link_libraries(${PROJECT_NAME}
@@ -142,6 +183,12 @@ target_link_libraries(${PROJECT_NAME}
 )
 if(ASTRA_HAVE_OPENNI2)
     target_link_libraries(${PROJECT_NAME} ${OPENNI2_LIBRARY})
+endif()
+if(ASTRA_HAVE_CUDA)
+    target_link_libraries(${PROJECT_NAME} CUDA::cudart)
+endif()
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX)
 endif()
 
 if(WIN32)

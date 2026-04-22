@@ -1,5 +1,6 @@
 #include "CaptureWorker.h"
 #include "AstraCamera.h"
+#include "../accel/GpuAccelerator.h"
 #include <QThread>
 #include <QCoreApplication>
 #include <QDebug>
@@ -94,7 +95,10 @@ void CaptureWorker::process()
                 // одном и том же разрешении, так что пересчёт не требуется на
                 // каждой итерации — но мы проверяем флаг дешёво.
                 scaleIntrinsicsToDepth(depth.cols, depth.rows);
-                auto cloud = convertToPointCloud(depth, color, m_fx, m_fy, m_cx, m_cy);
+                // Используем GpuAccelerator: CUDA на NVIDIA, OpenMP на AMD/Intel,
+                // single-thread как fallback.
+                auto cloud = GpuAccelerator::instance().depthToCloud(
+                    depth, color, m_fx, m_fy, m_cx, m_cy, 3);
                 if (cloud && !cloud->empty()) {
                     if (++cloudSendCounter % 3 == 0) {
                         pcl::VoxelGrid<pcl::PointXYZRGB> voxel;

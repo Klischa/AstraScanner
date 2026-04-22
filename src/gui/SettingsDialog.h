@@ -65,6 +65,9 @@ private:
     QDoubleSpinBox *m_poissonNormalRadius = nullptr;
     QSpinBox       *m_poissonKNearest = nullptr;
 
+    // Ускорение
+    QSpinBox       *m_ompThreads = nullptr;
+
     // Пути
     QLineEdit      *m_projectsDir = nullptr;
     QLineEdit      *m_exportDir = nullptr;
