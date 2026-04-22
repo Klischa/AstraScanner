@@ -74,9 +74,11 @@ MainWindow::MainWindow(QWidget* parent)
     setupUI();
     setupVisualizer();
 
+    // Адаптивный FPS рендеринга: во время сканирования обновляем чаще (200 мс
+    // = ~5 FPS), в покое — реже (1000 мс = 1 FPS) для экономии CPU/GPU.
     m_viewerUpdateTimer = new QTimer(this);
     connect(m_viewerUpdateTimer, &QTimer::timeout, this, &MainWindow::updateViewer);
-    m_viewerUpdateTimer->start(1000);
+    m_viewerUpdateTimer->start(200);
 
     m_scanTimeoutTimer = new QTimer(this);
     m_scanTimeoutTimer->setSingleShot(true);
@@ -953,7 +955,9 @@ void MainWindow::setupVisualizer()
     m_viewer->addCoordinateSystem(0.2);
     m_viewer->initCameraParameters();
     m_viewer->setCameraPosition(0, 0, -2, 0, 0, 1, 0, -1, 0);
-    m_viewer->getRenderWindow()->SetDesiredUpdateRate(5.0);
+    // Разрешаем VTK рендерить до 15 FPS; при больших облаках VTK
+    // автоматически снизит LOD для поддержания этого target.
+    m_viewer->getRenderWindow()->SetDesiredUpdateRate(15.0);
     qDebug() << "Visualizer setup complete";
 }
 
@@ -1202,6 +1206,13 @@ void MainWindow::onPointCloudReady(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud)
 void MainWindow::updateViewer()
 {
     if (!m_viewer) return;
+
+    // Адаптивный интервал: 200 мс при сканировании, 1000 мс в покое.
+    const int desiredMs = m_scanning ? 200 : 1000;
+    if (m_viewerUpdateTimer && m_viewerUpdateTimer->interval() != desiredMs) {
+        m_viewerUpdateTimer->setInterval(desiredMs);
+    }
+
     QMutexLocker locker(&m_cloudMutex);
     if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
 

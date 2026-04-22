@@ -1,0 +1,26 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeSettings.json
+
+# Generated documentation (Doxygen)
+docs/html/
+
+# Qt generated
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Logs
+logs/*.log
+
+# OS
+.DS_Store
+Thumbs.db

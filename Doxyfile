@@ -1,0 +1,36 @@
+# Doxyfile for AstraScanner
+# Generate with: doxygen Doxyfile
+# Output: docs/html/index.html
+
+PROJECT_NAME           = "AstraScanner"
+PROJECT_NUMBER         = "1.0"
+PROJECT_BRIEF          = "3D scanner based on Orbbec Astra Pro"
+OUTPUT_DIRECTORY       = docs
+INPUT                  = src README.md
+FILE_PATTERNS          = *.h *.cpp *.cu *.md
+RECURSIVE              = YES
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+USE_MDFILE_AS_MAINPAGE = README.md
+HAVE_DOT               = NO
+CLASS_DIAGRAMS         = YES
+COLLABORATION_GRAPH    = NO
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+BUILTIN_STL_SUPPORT    = YES
+PREDEFINED             = ASTRA_HAVE_OPENNI2 \
+                         ASTRA_HAVE_CUDA \
+                         _OPENMP \
+                         Q_OBJECT= \
+                         Q_INVOKABLE= \
+                         signals=public \
+                         slots=
+EXCLUDE_PATTERNS       = */build/* */out/* */.git/*
+WARN_IF_UNDOCUMENTED   = NO
+QUIET                  = YES

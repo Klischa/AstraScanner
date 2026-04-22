@@ -4,6 +4,7 @@
 #include <QObject>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include "IDepthSensor.h"
 
 // OpenNI2 SDK доступен только там, где его положил пользователь (обычно
 // только Windows с Orbbec-драйверами). На остальных платформах собираем
@@ -13,24 +14,26 @@
 #include <openni.h>
 #endif
 
-class AstraCamera : public QObject
+// Реализация IDepthSensor для камеры Orbbec Astra Pro.
+// Наследует QObject (для Qt-сигналов) и IDepthSensor (для полиморфизма).
+class AstraCamera : public QObject, public IDepthSensor
 {
     Q_OBJECT
 public:
     explicit AstraCamera(QObject* parent = nullptr);
-    ~AstraCamera();
+    ~AstraCamera() override;
 
-    bool initialize();
-    void shutdown();
-    bool startStreams();
-    void stopStreams();
-    bool readFrame(cv::Mat& colorMat, cv::Mat& depthMat);
-
-    bool getIntrinsics(float& fx, float& fy, float& cx, float& cy) const;
-
-    bool isInitialized() const { return m_initialized; }
-    bool isEmulationActive() const { return m_emulation; }
-    std::string getLastError() const { return m_lastError; }
+    // --- IDepthSensor ---
+    bool initialize() override;
+    void shutdown() override;
+    bool startStreams() override;
+    void stopStreams() override;
+    bool readFrame(cv::Mat& colorMat, cv::Mat& depthMat) override;
+    bool getIntrinsics(float& fx, float& fy, float& cx, float& cy) const override;
+    bool isInitialized() const override { return m_initialized; }
+    bool isEmulationActive() const override { return m_emulation; }
+    std::string getLastError() const override { return m_lastError; }
+    std::string sensorName() const override { return "Orbbec Astra Pro (OpenNI2)"; }
 
     void setEmulationMode(bool enable) { m_emulation = enable; }
 

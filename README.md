@@ -27,6 +27,8 @@
 | Ускорение | **CUDA** (NVIDIA GPU, опционально) и **OpenMP** (CPU, авто-определение). Конвертация depth→cloud выполняется на GPU или параллельно на CPU. Число потоков OpenMP настраивается в «Настройки → Ускорение». |
 | Асинхронные операции | Poisson и ICP-merge выполняются в `QtConcurrent::run` + `QFutureWatcher`, GUI не блокируется. |
 | Логирование | Qt `messageHandler` → `logs/scanner.log` + отдельная вкладка «Логи» в GUI. |
+| CI | GitHub Actions: автосборка на Linux (emulation-only) при каждом push/PR. |
+| Документация | Doxygen (`doxygen Doxyfile` → `docs/html/index.html`). |
 
 ---
 
@@ -150,7 +152,8 @@ src/
 │   └── DepthToCloudKernel.cu         — CUDA-ядро depth+color → XYZ+RGB (компилируется только с -DASTRA_ENABLE_CUDA=ON)
 │
 ├── capture/                          — захват с камеры
-│   ├── AstraCamera.h / .cpp          — OpenNI2 + UVC (OpenCV), emulation-mode без OpenNI2
+│   ├── IDepthSensor.h                — абстрактный интерфейс сенсора глубины (для поддержки разных камер)
+│   ├── AstraCamera.h / .cpp          — реализация IDepthSensor: OpenNI2 + UVC (OpenCV), emulation-mode
 │   └── CaptureWorker.h / .cpp        — поток захвата, depth→cloud через GpuAccelerator
 │
 ├── calibration/
@@ -197,6 +200,7 @@ src/
 - **Файл** → Новый проект / Открыть / Сохранить / Сохранить как.
 - **Правка** → Отменить (`Ctrl+Z`) / Повторить (`Ctrl+Y`) — Undo/Redo для операций с облаком.
 - **Экспорт** → Экспорт текущего облака (PLY / PCD), Экспорт меша (PLY / STL / OBJ).
+- **Импорт** → Импорт облака (`Ctrl+I`) — загрузка PLY / PCD файла как текущего облака для обработки.
 - **Настройки** → Параметры… (`Ctrl+,`) — единый диалог с вкладками: Сканирование, Фильтры, ICP, Poisson, Ускорение, Пути.
 
 ### Первый запуск и калибровка
