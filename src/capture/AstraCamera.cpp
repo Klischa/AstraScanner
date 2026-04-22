@@ -63,6 +63,13 @@ bool AstraCamera::initialize()
         return true;
     }
 
+#ifndef ASTRA_HAVE_OPENNI2
+    // Сборка без OpenNI2 SDK (Linux/macOS или Windows с выключенным
+    // ASTRA_ENABLE_OPENNI2) — сразу уходим в эмуляцию. Остальные модули
+    // (фильтры, ICP, Poisson, экспорт) продолжают работать штатно.
+    enableEmulation("Built without OpenNI2 SDK — emulation mode");
+    return true;
+#else
     qDebug() << "Initializing OpenNI...";
     openni::Status rc = openni::OpenNI::initialize();
     if (rc != openni::STATUS_OK) {
@@ -123,13 +130,16 @@ bool AstraCamera::initialize()
 
     m_initialized = true;
     return true;
+#endif // ASTRA_HAVE_OPENNI2
 }
 
 void AstraCamera::shutdown()
 {
     stopStreams();
+#ifdef ASTRA_HAVE_OPENNI2
     if (m_device.isValid()) m_device.close();
     if (!m_emulation) openni::OpenNI::shutdown();
+#endif
     if (m_colorCapture.isOpened()) m_colorCapture.release();
     m_initialized = false;
 }
@@ -139,6 +149,11 @@ bool AstraCamera::startStreams()
     if (m_emulation) return true;
     if (!m_initialized) return false;
 
+#ifndef ASTRA_HAVE_OPENNI2
+    // Без OpenNI2 ре-инициализация потоков не имеет смысла; оставляем
+    // emulation-путь.
+    return true;
+#else
     if (!m_device.hasSensor(openni::SENSOR_DEPTH)) {
         m_lastError = "Device has no depth sensor";
         return false;
@@ -171,14 +186,17 @@ bool AstraCamera::startStreams()
     }
 
     return true;
+#endif // ASTRA_HAVE_OPENNI2
 }
 
 void AstraCamera::stopStreams()
 {
+#ifdef ASTRA_HAVE_OPENNI2
     if (!m_emulation && m_depthStream.isValid()) {
         m_depthStream.stop();
         m_depthStream.destroy();
     }
+#endif
 }
 
 bool AstraCamera::readFrame(cv::Mat &colorMat, cv::Mat &depthMat)
@@ -188,6 +206,12 @@ bool AstraCamera::readFrame(cv::Mat &colorMat, cv::Mat &depthMat)
         return true;
     }
 
+#ifndef ASTRA_HAVE_OPENNI2
+    // Не должно случаться: без OpenNI2 initialize() уводит в emulation-mode,
+    // так что сюда мы попасть не можем. Но на всякий случай — подстраховка.
+    generateTestFrames(colorMat, depthMat);
+    return true;
+#else
     cv::Mat tempColor;
     if (!m_colorCapture.read(tempColor) || tempColor.empty()) return false;
     colorMat = tempColor.clone();
@@ -203,6 +227,7 @@ bool AstraCamera::readFrame(cv::Mat &colorMat, cv::Mat &depthMat)
     memcpy(depthMat.data, pDepth, depthMat.total() * sizeof(uint16_t));
 
     return !depthMat.empty();
+#endif // ASTRA_HAVE_OPENNI2
 }
 
 bool AstraCamera::getIntrinsics(float &fx, float &fy, float &cx, float &cy) const

@@ -2,6 +2,7 @@
 #include "../capture/CaptureWorker.h"
 #include "../calibration/CameraCalibrator.h"
 #include "LiveCloudWindow.h"
+#include "SettingsDialog.h"
 #include "../filters/PointCloudFilters.h"
 #include "../settings/SettingsManager.h"
 #include "../export/ExportManager.h"
@@ -142,6 +143,11 @@ void MainWindow::setupUI()
     QAction *exportMeshAct  = exportMenu->addAction("Экспорт меша…");
     connect(exportCloudAct, &QAction::triggered, this, &MainWindow::onExportCurrentCloud);
     connect(exportMeshAct,  &QAction::triggered, this, &MainWindow::onExportMesh);
+
+    QMenu *settingsMenu = menuBar()->addMenu("&Настройки");
+    QAction *settingsAct = settingsMenu->addAction("Параметры…");
+    settingsAct->setShortcut(QKeySequence("Ctrl+,"));
+    connect(settingsAct, &QAction::triggered, this, &MainWindow::onShowSettingsDialog);
 
     m_tabWidget = new QTabWidget(this);
     mainLayout->addWidget(m_tabWidget);
@@ -291,6 +297,49 @@ void MainWindow::setupUI()
     m_vtkWidget = new QVTKOpenGLNativeWidget(this);
     m_vtkWidget->setMinimumSize(640, 480);
     scanLayout->addWidget(m_vtkWidget);
+
+    // --- Режим «поворотный стол» / авто-сохранение по таймеру ---
+    // Пока включён и идёт сканирование, каждые N секунд текущее облако
+    // сохраняется в проект как отдельный скан и m_accumulatedCloud
+    // очищается. Между тиками пользователь вручную поворачивает объект
+    // (или использует моторизованный стол). После того, как снято count
+    // сканов, таймер останавливается автоматически. ICP-merge сканов
+    // запускается отдельно на вкладке «Обработка».
+    QGroupBox *turntableGroup = new QGroupBox(
+        "Режим «поворотный стол» / авто-сохранение", this);
+    QHBoxLayout *turntableLayout = new QHBoxLayout(turntableGroup);
+
+    m_turntableEnableChk = new QCheckBox("Включить", this);
+    m_turntableEnableChk->setToolTip(
+        "Периодически сохраняет текущее облако как скан проекта и очищает "
+        "накопитель. Работает только при открытом проекте и активном сканировании.");
+    turntableLayout->addWidget(m_turntableEnableChk);
+
+    turntableLayout->addWidget(new QLabel("Интервал:", this));
+    m_turntableIntervalSpin = new QSpinBox(this);
+    m_turntableIntervalSpin->setRange(1, 600);
+    m_turntableIntervalSpin->setSuffix(" сек");
+    m_turntableIntervalSpin->setValue(10);
+    turntableLayout->addWidget(m_turntableIntervalSpin);
+
+    turntableLayout->addWidget(new QLabel("Сканов:", this));
+    m_turntableCountSpin = new QSpinBox(this);
+    m_turntableCountSpin->setRange(1, 360);
+    m_turntableCountSpin->setValue(12);
+    m_turntableCountSpin->setToolTip("Остановить режим после стольких сохранённых сканов.");
+    turntableLayout->addWidget(m_turntableCountSpin);
+
+    m_turntableStatusLabel = new QLabel("Сохранено 0 сканов", this);
+    turntableLayout->addWidget(m_turntableStatusLabel, 1);
+    turntableLayout->addStretch();
+
+    scanLayout->addWidget(turntableGroup);
+
+    m_turntableTimer = new QTimer(this);
+    connect(m_turntableTimer, &QTimer::timeout, this, &MainWindow::onTurntableTick);
+    connect(m_turntableEnableChk, &QCheckBox::toggled,
+            this, &MainWindow::onTurntableToggled);
+
     scanLayout->addStretch();
 
     // Вкладка "Калибровка"
@@ -526,6 +575,81 @@ void MainWindow::setupUI()
     normalRow->addStretch();
     meshLayout->addLayout(normalRow);
 
+    // --- Ручная переориентация нормалей ---
+    // По умолчанию computeNormals в PointCloudFilters задаёт view-point по
+    // эвристике (центр облака, сдвинутый на 1 м «к камере» по Z). Для
+    // сильно замкнутых объектов эта эвристика иногда выдаёт нормали наружу
+    // на одной половине и внутрь на другой — Poisson в таком случае рисует
+    // меш «наизнанку». Эти контролы позволяют задать ориентацию явно.
+    QGroupBox *normalOrientGroup = new QGroupBox(
+        "Ориентация нормалей (при проблемах с Poisson)", this);
+    QVBoxLayout *normalOrientLayout = new QVBoxLayout(normalOrientGroup);
+
+    m_poissonFlipNormalsChk = new QCheckBox("Инвертировать нормали (flip)", this);
+    m_poissonFlipNormalsChk->setToolTip(
+        "Развернуть все нормали на 180°. Помогает, если меш получился "
+        "«вывернут наизнанку».");
+    normalOrientLayout->addWidget(m_poissonFlipNormalsChk);
+
+    m_poissonConsistentOrientChk = new QCheckBox(
+        "Согласованная ориентация (BFS по k-соседям)", this);
+    m_poissonConsistentOrientChk->setToolTip(
+        "Распространяет ориентацию от seed-точки по ближайшим соседям так, "
+        "чтобы нормали были сонаправлены. Помогает для замкнутых объектов, "
+        "где единый view-point даёт локально противоположные нормали. "
+        "Медленнее на больших облаках.");
+    normalOrientLayout->addWidget(m_poissonConsistentOrientChk);
+
+    QHBoxLayout *vpRow = new QHBoxLayout();
+    m_poissonCustomVpChk = new QCheckBox("Custom view-point:", this);
+    m_poissonCustomVpChk->setToolTip(
+        "Использовать заданные координаты (X, Y, Z) в метрах как view-point "
+        "для ориентации нормалей вместо эвристики (centroid - 1 м по Z).");
+    vpRow->addWidget(m_poissonCustomVpChk);
+
+    auto *vpXLabel = new QLabel("X:", this);
+    m_poissonVpX = new QDoubleSpinBox(this);
+    m_poissonVpX->setRange(-10.0, 10.0);
+    m_poissonVpX->setDecimals(3);
+    m_poissonVpX->setSingleStep(0.05);
+    m_poissonVpX->setSuffix(" м");
+    m_poissonVpX->setEnabled(false);
+
+    auto *vpYLabel = new QLabel("Y:", this);
+    m_poissonVpY = new QDoubleSpinBox(this);
+    m_poissonVpY->setRange(-10.0, 10.0);
+    m_poissonVpY->setDecimals(3);
+    m_poissonVpY->setSingleStep(0.05);
+    m_poissonVpY->setSuffix(" м");
+    m_poissonVpY->setEnabled(false);
+
+    auto *vpZLabel = new QLabel("Z:", this);
+    m_poissonVpZ = new QDoubleSpinBox(this);
+    m_poissonVpZ->setRange(-10.0, 10.0);
+    m_poissonVpZ->setDecimals(3);
+    m_poissonVpZ->setSingleStep(0.05);
+    m_poissonVpZ->setSuffix(" м");
+    m_poissonVpZ->setValue(-1.0);   // эквивалент дефолтной эвристики
+    m_poissonVpZ->setEnabled(false);
+
+    vpRow->addWidget(vpXLabel);
+    vpRow->addWidget(m_poissonVpX);
+    vpRow->addWidget(vpYLabel);
+    vpRow->addWidget(m_poissonVpY);
+    vpRow->addWidget(vpZLabel);
+    vpRow->addWidget(m_poissonVpZ);
+    vpRow->addStretch();
+    normalOrientLayout->addLayout(vpRow);
+
+    connect(m_poissonCustomVpChk, &QCheckBox::toggled, this,
+            [this](bool on) {
+                m_poissonVpX->setEnabled(on);
+                m_poissonVpY->setEnabled(on);
+                m_poissonVpZ->setEnabled(on);
+            });
+
+    meshLayout->addWidget(normalOrientGroup);
+
     QPushButton *reconstructBtn = new QPushButton("Построить меш", this);
     QPushButton *showCloudBtn   = new QPushButton("Показать облако", this);
     QPushButton *exportMeshBtnP = new QPushButton("Экспорт меша…", this);
@@ -560,6 +684,16 @@ void MainWindow::setupUI()
             p.samplesPerNode = static_cast<float>(samplesSpin->value());
             p.normalSearchRadius = normalRadiusSpin->value();
             p.kNearest = kNearestSpin->value();
+
+            // Ручная переориентация нормалей, если пользователь включил.
+            p.flipNormals = m_poissonFlipNormalsChk && m_poissonFlipNormalsChk->isChecked();
+            p.consistentOrientation = m_poissonConsistentOrientChk && m_poissonConsistentOrientChk->isChecked();
+            if (m_poissonCustomVpChk && m_poissonCustomVpChk->isChecked()) {
+                p.useCustomViewpoint = true;
+                p.viewpointX = static_cast<float>(m_poissonVpX->value());
+                p.viewpointY = static_cast<float>(m_poissonVpY->value());
+                p.viewpointZ = static_cast<float>(m_poissonVpZ->value());
+            }
 
             SettingsManager &s = SettingsManager::instance();
             s.setPoissonDepth(p.depth);
@@ -1509,4 +1643,118 @@ void MainWindow::onShowCloudClicked()
         }
     }
     m_vtkWidget->renderWindow()->Render();
+}
+
+// ========== Настройки → Параметры… ==========
+void MainWindow::onShowSettingsDialog()
+{
+    SettingsDialog dlg(this);
+    dlg.exec();
+    // SettingsManager::settingsChanged уже эмитится при каждой записи,
+    // так что подписчики (LiveCloudWindow и т.п.) получат обновления
+    // автоматически. Существующие UI-виджеты на вкладках читают QSettings
+    // только при запуске — при следующем взаимодействии они подхватят
+    // новые значения через соответствующие click-handler'ы.
+}
+
+// ========== Поворотный стол / авто-сохранение ==========
+void MainWindow::onTurntableToggled(bool enabled)
+{
+    if (!m_turntableTimer) return;
+
+    if (!enabled) {
+        m_turntableTimer->stop();
+        if (m_turntableStatusLabel) {
+            m_turntableStatusLabel->setText(
+                QString("Остановлено. Сохранено %1 сканов").arg(m_turntableCaptured));
+        }
+        return;
+    }
+
+    // Предварительные условия: открытый проект обязателен, сканирование
+    // опционально (если пользователь хочет просто snapshot-нуть текущее
+    // накопленное облако несколько раз, это тоже валидно).
+    if (!m_project || !m_project->isOpen()) {
+        QMessageBox::warning(this, "Поворотный стол",
+            "Сначала создайте или откройте проект (меню «Файл»).");
+        m_turntableEnableChk->setChecked(false);
+        return;
+    }
+
+    m_turntableCaptured = 0;
+    const int intervalMs = m_turntableIntervalSpin->value() * 1000;
+    m_turntableTimer->start(intervalMs);
+    if (m_turntableStatusLabel) {
+        m_turntableStatusLabel->setText(
+            QString("Идёт: 0 / %1, интервал %2 с")
+                .arg(m_turntableCountSpin->value())
+                .arg(m_turntableIntervalSpin->value()));
+    }
+    qInfo() << "[Turntable] started: interval =" << intervalMs / 1000
+            << "s, count =" << m_turntableCountSpin->value();
+}
+
+void MainWindow::onTurntableTick()
+{
+    if (!m_project || !m_project->isOpen()) {
+        qWarning() << "[Turntable] project closed mid-run — stopping";
+        m_turntableTimer->stop();
+        if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
+        return;
+    }
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+            qWarning() << "[Turntable] tick: accumulated cloud empty, skipping";
+            if (m_turntableStatusLabel) {
+                m_turntableStatusLabel->setText(
+                    QString("Пропуск тика (пустое облако), сохранено %1")
+                        .arg(m_turntableCaptured));
+            }
+            return;
+        }
+        snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        m_accumulatedCloud->clear();
+    }
+
+    const QString name = QString("turntable_%1_%2")
+        .arg(m_turntableCaptured + 1, 3, 10, QChar('0'))
+        .arg(QDateTime::currentDateTime().toString("HHmmss"));
+    const int idx = m_project->addScan(snapshot, name);
+    if (idx < 0) {
+        qCritical() << "[Turntable] addScan failed:" << m_project->lastError();
+        m_turntableTimer->stop();
+        if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
+        QMessageBox::critical(this, "Поворотный стол",
+            QString("Не удалось сохранить скан:\n%1").arg(m_project->lastError()));
+        return;
+    }
+    ++m_turntableCaptured;
+
+    // Обновляем GUI: счётчики облака, вьюер.
+    emit cloudSizeChanged(0);
+    if (m_viewer) m_viewer->removeAllPointClouds();
+
+    const int target = m_turntableCountSpin->value();
+    if (m_turntableStatusLabel) {
+        m_turntableStatusLabel->setText(
+            QString("Сохранено %1 / %2 (%3 точек в последнем скане)")
+                .arg(m_turntableCaptured).arg(target).arg(snapshot->size()));
+    }
+    qInfo() << "[Turntable] saved scan" << m_turntableCaptured << "/" << target
+            << "(" << snapshot->size() << "points) as index" << idx;
+
+    if (m_turntableCaptured >= target) {
+        m_turntableTimer->stop();
+        if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
+        statusBar()->showMessage(
+            QString("Поворотный стол: готово, сохранено %1 сканов").arg(m_turntableCaptured),
+            5000);
+        QMessageBox::information(this, "Поворотный стол",
+            QString("Готово. Сохранено %1 сканов в проекте.\n"
+                    "Перейдите на вкладку «Обработка» → «Объединить все сканы проекта», "
+                    "чтобы склеить их через ICP.").arg(m_turntableCaptured));
+    }
 }

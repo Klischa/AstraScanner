@@ -25,6 +25,9 @@ QT_BEGIN_NAMESPACE
 class QTabWidget;
 class QPushButton;
 class QVTKOpenGLNativeWidget;
+class QCheckBox;
+class QSpinBox;
+class QDoubleSpinBox;
 QT_END_NAMESPACE
 
 class CaptureWorker;
@@ -93,6 +96,13 @@ private slots:
     void onMergeScansClicked(const PointCloudFilters::MergeParams &params);
     void onMergeFinished();
     void onSaveMergedToProject();
+
+    // --- Настройки (единый диалог) ---
+    void onShowSettingsDialog();
+
+    // --- Поворотный стол / авто-сохранение по таймеру ---
+    void onTurntableToggled(bool enabled);
+    void onTurntableTick();
 
 private:
     void setupUI();
@@ -175,6 +185,24 @@ private:
     // Последний результат ICP-мержа, готовый к записи в проект как новый
     // скан. Null — результата ещё нет.
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr m_lastMerged;
+
+    // Ручная переориентация нормалей для Poisson. Живут прямо в UI
+    // группы «Реконструкция поверхности», чтобы значения читались в момент
+    // нажатия «Построить меш».
+    QCheckBox       *m_poissonFlipNormalsChk = nullptr;
+    QCheckBox       *m_poissonCustomVpChk = nullptr;
+    QDoubleSpinBox  *m_poissonVpX = nullptr;
+    QDoubleSpinBox  *m_poissonVpY = nullptr;
+    QDoubleSpinBox  *m_poissonVpZ = nullptr;
+    QCheckBox       *m_poissonConsistentOrientChk = nullptr;
+
+    // Поворотный стол / авто-сохранение
+    QTimer          *m_turntableTimer = nullptr;
+    QCheckBox       *m_turntableEnableChk = nullptr;
+    QSpinBox        *m_turntableIntervalSpin = nullptr;
+    QSpinBox        *m_turntableCountSpin = nullptr;
+    QLabel          *m_turntableStatusLabel = nullptr;
+    int              m_turntableCaptured = 0;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений

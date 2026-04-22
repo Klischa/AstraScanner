@@ -2,9 +2,16 @@
 #define ASTRACAMERA_H
 
 #include <QObject>
-#include <openni.h>
 #include <opencv2/opencv.hpp>
 #include <string>
+
+// OpenNI2 SDK доступен только там, где его положил пользователь (обычно
+// только Windows с Orbbec-драйверами). На остальных платформах собираем
+// без OpenNI2; AstraCamera автоматически переключается в emulation-mode и
+// отдаёт синтетические кадры, чтобы приложение хотя бы запускалось.
+#ifdef ASTRA_HAVE_OPENNI2
+#include <openni.h>
+#endif
 
 class AstraCamera : public QObject
 {
@@ -28,9 +35,11 @@ public:
     void setEmulationMode(bool enable) { m_emulation = enable; }
 
 private:
+#ifdef ASTRA_HAVE_OPENNI2
     openni::Device m_device;
     openni::VideoStream m_depthStream;
     openni::VideoFrameRef m_depthFrame;
+#endif
 
     cv::VideoCapture m_colorCapture;
     int m_colorIndex = -1;
