@@ -1985,11 +1985,17 @@ void MainWindow::onLassoCompleted(const QPolygonF &polygonWidget)
     updateViewer();
 
     if (m_lassoStatusLabel) {
-        m_lassoStatusLabel->setText(
-            QString("%1 %2 точек, осталось %3")
-                .arg(keep ? "Оставлено" : "Удалено")
-                .arg(removed)
-                .arg(result->size()));
+        if (keep) {
+            m_lassoStatusLabel->setText(
+                QString("Оставлено %1 точек, удалено %2")
+                    .arg(result->size())
+                    .arg(removed));
+        } else {
+            m_lassoStatusLabel->setText(
+                QString("Удалено %1 точек, осталось %2")
+                    .arg(removed)
+                    .arg(result->size()));
+        }
     }
     qInfo() << "[Lasso]" << (keep ? "keep" : "delete")
             << "removed" << removed << "points; result size =" << result->size();
