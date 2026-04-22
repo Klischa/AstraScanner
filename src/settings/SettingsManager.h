@@ -42,6 +42,19 @@ public:
     int rorMinNeighbors() const;
     void setRorMinNeighbors(int n);
 
+    // --- ICP-регистрация (объединение сканов) ---
+    double icpMaxCorrespondenceDistance() const;   // метры
+    void setIcpMaxCorrespondenceDistance(double meters);
+
+    int icpMaxIterations() const;
+    void setIcpMaxIterations(int n);
+
+    bool icpSkipNonConverged() const;
+    void setIcpSkipNonConverged(bool skip);
+
+    double icpVoxelLeafOut() const;                // метры, 0 = без децимации
+    void setIcpVoxelLeafOut(double meters);
+
     // --- Poisson-реконструкция ---
     int poissonDepth() const;               // typical 8..10
     void setPoissonDepth(int depth);

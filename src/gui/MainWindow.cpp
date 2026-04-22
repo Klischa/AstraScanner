@@ -30,6 +30,8 @@
 #include <QAction>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QLineEdit>
+#include <QDateTime>
 #include <QDir>
 #include <QtConcurrent/QtConcurrent>
 #include <QFuture>
@@ -390,18 +392,75 @@ void MainWindow::setupUI()
 
     processingLayout->addWidget(filterGroup);
 
-    QGroupBox* registrationGroup = new QGroupBox("Регистрация сканов", this);
+    QGroupBox* registrationGroup = new QGroupBox("Регистрация сканов (ICP)", this);
     QVBoxLayout* registrationLayout = new QVBoxLayout(registrationGroup);
 
-    QPushButton* mergeScansBtn = new QPushButton("Объединить все сканы", this);
-    registrationLayout->addWidget(mergeScansBtn);
+    SettingsManager &settingsIcp = SettingsManager::instance();
+
+    QHBoxLayout *icpParamsRow = new QHBoxLayout();
+    QLabel *icpMaxCorrLabel = new QLabel("Max correspondence (м):", this);
+    QDoubleSpinBox *icpMaxCorrSpin = new QDoubleSpinBox(this);
+    icpMaxCorrSpin->setRange(0.001, 1.0);
+    icpMaxCorrSpin->setDecimals(3);
+    icpMaxCorrSpin->setSingleStep(0.005);
+    icpMaxCorrSpin->setValue(settingsIcp.icpMaxCorrespondenceDistance());
+    icpMaxCorrSpin->setToolTip("Максимальное расстояние, на котором ICP ищет пары точек. "
+                               "Начните с 5 см; уменьшайте до 1–2 см после грубого выравнивания.");
+
+    QLabel *icpIterLabel = new QLabel("Итерации:", this);
+    QSpinBox *icpIterSpin = new QSpinBox(this);
+    icpIterSpin->setRange(5, 500);
+    icpIterSpin->setValue(settingsIcp.icpMaxIterations());
+
+    QLabel *icpVoxelLabel = new QLabel("Финальный воксель (м):", this);
+    QDoubleSpinBox *icpVoxelSpin = new QDoubleSpinBox(this);
+    icpVoxelSpin->setRange(0.0, 0.05);
+    icpVoxelSpin->setDecimals(4);
+    icpVoxelSpin->setSingleStep(0.0005);
+    icpVoxelSpin->setValue(settingsIcp.icpVoxelLeafOut());
+    icpVoxelSpin->setToolTip("0 → без децимации. Полезно после мержа — N сканов "
+                             "дают N×point density, а voxel этот дубль снимает.");
+
+    QCheckBox *icpSkipCheck = new QCheckBox("Пропускать несошедшиеся", this);
+    icpSkipCheck->setChecked(settingsIcp.icpSkipNonConverged());
+    icpSkipCheck->setToolTip("Если ICP не сошёлся на скане — пропустить его, "
+                             "а не добавлять «как есть». Безопаснее при плохих данных.");
+
+    icpParamsRow->addWidget(icpMaxCorrLabel);
+    icpParamsRow->addWidget(icpMaxCorrSpin);
+    icpParamsRow->addSpacing(8);
+    icpParamsRow->addWidget(icpIterLabel);
+    icpParamsRow->addWidget(icpIterSpin);
+    icpParamsRow->addSpacing(8);
+    icpParamsRow->addWidget(icpVoxelLabel);
+    icpParamsRow->addWidget(icpVoxelSpin);
+    icpParamsRow->addStretch();
+    registrationLayout->addLayout(icpParamsRow);
+    registrationLayout->addWidget(icpSkipCheck);
+
+    QHBoxLayout *mergeBtnRow = new QHBoxLayout();
+    QPushButton *mergeScansBtn = new QPushButton("Объединить все сканы проекта", this);
+    mergeScansBtn->setToolTip("Последовательная ICP-регистрация: scans[0] как опорный, "
+                              "каждый следующий выравнивается относительно накопленного результата.");
+    QPushButton *addMergedBtn = new QPushButton("Сохранить результат в проект…", this);
+    addMergedBtn->setEnabled(false);
+    mergeBtnRow->addWidget(mergeScansBtn);
+    mergeBtnRow->addWidget(addMergedBtn);
+    mergeBtnRow->addStretch();
+    registrationLayout->addLayout(mergeBtnRow);
 
     QProgressBar* registrationProgress = new QProgressBar(this);
     registrationProgress->setRange(0, 100);
     registrationProgress->setValue(0);
     registrationLayout->addWidget(registrationProgress);
 
+    QLabel *icpStatusLabel = new QLabel("", this);
+    registrationLayout->addWidget(icpStatusLabel);
+
     processingLayout->addWidget(registrationGroup);
+    m_mergeBtn = mergeScansBtn;
+    m_addMergedBtn = addMergedBtn;
+    m_icpStatusLabel = icpStatusLabel;
 
     // --- Poisson Surface Reconstruction ---
     QGroupBox *meshGroup = new QGroupBox("Реконструкция поверхности (Poisson)", this);
@@ -558,16 +617,24 @@ void MainWindow::setupUI()
         updateViewer();
     });
 
-    connect(mergeScansBtn, &QPushButton::clicked, this, [this, registrationProgress]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    connect(mergeScansBtn, &QPushButton::clicked, this,
+        [this, icpMaxCorrSpin, icpIterSpin, icpVoxelSpin, icpSkipCheck]() {
+            PointCloudFilters::MergeParams p;
+            p.maxCorrespondenceDistance = icpMaxCorrSpin->value();
+            p.maximumIterations = icpIterSpin->value();
+            p.voxelLeafOut = icpVoxelSpin->value();
+            p.skipNonConverged = icpSkipCheck->isChecked();
 
-        std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> scans = {m_accumulatedCloud};
-        auto merged = m_filters->mergeScans(scans);
-        *m_accumulatedCloud = *merged;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
-    });
+            SettingsManager &s = SettingsManager::instance();
+            s.setIcpMaxCorrespondenceDistance(p.maxCorrespondenceDistance);
+            s.setIcpMaxIterations(p.maximumIterations);
+            s.setIcpVoxelLeafOut(p.voxelLeafOut);
+            s.setIcpSkipNonConverged(p.skipNonConverged);
+
+            onMergeScansClicked(p);
+        });
+
+    connect(addMergedBtn, &QPushButton::clicked, this, &MainWindow::onSaveMergedToProject);
 
     connect(m_filters, &PointCloudFilters::progressUpdated, registrationProgress, &QProgressBar::setValue);
     connect(m_filters, &PointCloudFilters::filterCompleted, this, [this](const QString &filter, int before, int after) {
@@ -1297,6 +1364,132 @@ void MainWindow::onPoissonFinished()
         m_viewer->addPolygonMesh(m_lastMesh, m_meshViewerId.toStdString());
         m_vtkWidget->renderWindow()->Render();
     }
+}
+
+// ========== ICP-регистрация (merge проекта) ==========
+
+void MainWindow::onMergeScansClicked(const PointCloudFilters::MergeParams &params)
+{
+    if (!m_project || !m_project->isOpen() || m_project->scanCount() < 2) {
+        QMessageBox::information(this, "Объединение",
+            "Для объединения нужен открытый проект с ≥ 2 сканами. "
+            "Добавьте сканы через вкладку «Проект».");
+        return;
+    }
+
+    if (m_mergeWatcher && m_mergeWatcher->isRunning()) {
+        QMessageBox::information(this, "Объединение",
+            "Объединение уже запущено — дождитесь завершения.");
+        return;
+    }
+
+    // Подгружаем все облака синхронно (disk I/O — быстро, в отличие от ICP).
+    std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> scans;
+    scans.reserve(m_project->scanCount());
+    for (int i = 0; i < m_project->scanCount(); ++i) {
+        auto c = m_project->scanCloud(i);
+        if (!c || c->empty()) {
+            qWarning() << "[merge] skipping empty scan" << i;
+            continue;
+        }
+        scans.push_back(c);
+    }
+    if (scans.size() < 2) {
+        QMessageBox::information(this, "Объединение",
+            "После загрузки осталось < 2 непустых сканов.");
+        return;
+    }
+
+    if (m_mergeBtn) m_mergeBtn->setEnabled(false);
+    if (m_addMergedBtn) m_addMergedBtn->setEnabled(false);
+    if (m_icpStatusLabel) m_icpStatusLabel->setText(
+        QString("Идёт ICP-регистрация %1 сканов…").arg(scans.size()));
+    statusBar()->showMessage("ICP: объединение сканов…");
+
+    if (!m_mergeWatcher) {
+        m_mergeWatcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(m_mergeWatcher,
+                &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished,
+                this, &MainWindow::onMergeFinished);
+    }
+
+    QFuture<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> future =
+        QtConcurrent::run([this, scans, params]() {
+            return m_filters->mergeScans(scans, params);
+        });
+    m_mergeWatcher->setFuture(future);
+}
+
+void MainWindow::onMergeFinished()
+{
+    if (!m_mergeWatcher) return;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr merged = m_mergeWatcher->result();
+
+    if (m_mergeBtn) m_mergeBtn->setEnabled(true);
+
+    if (!merged || merged->empty()) {
+        if (m_icpStatusLabel) m_icpStatusLabel->setText("Объединение не удалось (см. лог)");
+        statusBar()->showMessage("ICP: пустой результат", 5000);
+        QMessageBox::warning(this, "Объединение",
+            "ICP вернул пустое облако. Возможно, все сканы были пустыми "
+            "или не сошлись.");
+        return;
+    }
+
+    m_lastMerged = merged;
+    const int npts = static_cast<int>(merged->size());
+    if (m_icpStatusLabel) m_icpStatusLabel->setText(
+        QString("Готово: %1 точек в объединённом облаке").arg(npts));
+    statusBar()->showMessage(
+        QString("ICP: объединено в %1 точек").arg(npts), 5000);
+    if (m_addMergedBtn) m_addMergedBtn->setEnabled(true);
+
+    // Показываем результат как текущее накопленное облако.
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud) {
+            m_accumulatedCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+        }
+        *m_accumulatedCloud = *merged;
+    }
+    emit cloudSizeChanged(npts);
+
+    // Если в вьюаре был меш — убираем, чтобы облако было видно.
+    if (m_viewer && !m_meshViewerId.isEmpty()) {
+        m_viewer->removePolygonMesh(m_meshViewerId.toStdString());
+        m_meshViewerId.clear();
+    }
+    updateViewer();
+}
+
+void MainWindow::onSaveMergedToProject()
+{
+    if (!m_lastMerged || m_lastMerged->empty()) {
+        QMessageBox::information(this, "Сохранение",
+            "Нет объединённого облака. Сначала выполните «Объединить все сканы проекта».");
+        return;
+    }
+    if (!m_project || !m_project->isOpen()) {
+        QMessageBox::warning(this, "Сохранение", "Проект не открыт.");
+        return;
+    }
+
+    bool ok = false;
+    const QString defaultName =
+        QString("merged_%1").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    const QString name = QInputDialog::getText(this, "Новый скан",
+        "Имя:", QLineEdit::Normal, defaultName, &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+
+    const int index = m_project->addScan(m_lastMerged, name.trimmed());
+    if (index < 0) {
+        QMessageBox::critical(this, "Сохранение",
+            QString("Не удалось добавить скан:\n%1").arg(m_project->lastError()));
+        return;
+    }
+    refreshScansList();
+    statusBar()->showMessage(
+        QString("Сохранено как скан #%1 «%2»").arg(index).arg(name.trimmed()), 5000);
 }
 
 void MainWindow::onShowCloudClicked()

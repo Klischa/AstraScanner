@@ -61,9 +61,22 @@ public:
         double maxCorrespondenceDistance = 0.05,
         int maximumIterations = 50);
 
-    // Объединение нескольких сканов
+    // Объединение нескольких сканов: последовательная pairwise-регистрация
+    // через ICP. scans[0] используется как «якорь» (reference), каждый
+    // следующий скан выравнивается относительно уже накопленного облака.
+    // При сбоях ICP на отдельном скане он либо добавляется «как есть»
+    // (skipNonConverged=false), либо пропускается (true). Дополнительно
+    // применяется финальная воксельная децимация, если voxelLeafOut > 0,
+    // чтобы объединённое облако не раздувалось в разы.
+    struct MergeParams {
+        double maxCorrespondenceDistance = 0.05;   // 5 см
+        int maximumIterations = 50;
+        bool skipNonConverged = false;
+        double voxelLeafOut = 0.0;                 // 0 → без децимации
+    };
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr mergeScans(
-        const std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &scans);
+        const std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &scans,
+        const MergeParams &params = {});
 
     // Poisson Surface Reconstruction: строит замкнутый водонепроницаемый меш
     // из плотного облака точек. Внутри оценивает нормали (если их нет),
