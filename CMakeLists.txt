@@ -106,7 +106,6 @@ add_definitions(${PCL_DEFINITIONS})
 set(SOURCES
     src/main.cpp
     src/gui/MainWindow.cpp
-    src/gui/LiveCloudWindow.cpp
     src/gui/SettingsDialog.cpp
     src/gui/LassoSelector.cpp
     src/capture/AstraCamera.cpp
