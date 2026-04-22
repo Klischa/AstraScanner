@@ -10,6 +10,47 @@
 
 ExportManager::ExportManager(QObject *parent) : QObject(parent) {}
 
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr ExportManager::loadPointCloud(const QString &filename)
+{
+    m_lastError.clear();
+    auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+
+    if (filename.isEmpty()) {
+        m_lastError = "Пустое имя файла.";
+        return nullptr;
+    }
+
+    const QString suffix = QFileInfo(filename).suffix().toLower();
+    const std::string path = filename.toStdString();
+    int rc = -1;
+
+    try {
+        if (suffix == "ply") {
+            rc = pcl::io::loadPLYFile<pcl::PointXYZRGB>(path, *cloud);
+        } else if (suffix == "pcd") {
+            rc = pcl::io::loadPCDFile<pcl::PointXYZRGB>(path, *cloud);
+        } else {
+            m_lastError = QString("Неподдерживаемый формат: .%1 (ожидается .ply или .pcd)").arg(suffix);
+            qWarning() << "[Import]" << m_lastError;
+            return nullptr;
+        }
+    } catch (const std::exception &ex) {
+        m_lastError = QString("Исключение при загрузке: %1").arg(ex.what());
+        qCritical() << "[Import]" << m_lastError;
+        return nullptr;
+    }
+
+    if (rc != 0 || cloud->empty()) {
+        m_lastError = QString("Не удалось загрузить облако из %1 (код %2, точек: %3)")
+            .arg(filename).arg(rc).arg(cloud->size());
+        qWarning() << "[Import]" << m_lastError;
+        return nullptr;
+    }
+
+    qInfo() << "[Import] Loaded" << cloud->size() << "points from" << filename;
+    return cloud;
+}
+
 ExportManager::CloudFormat ExportManager::detectCloudFormat(const QString &filename)
 {
     const QString suffix = QFileInfo(filename).suffix().toLower();

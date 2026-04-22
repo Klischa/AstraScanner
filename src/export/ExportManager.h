@@ -23,6 +23,10 @@ public:
 
     explicit ExportManager(QObject *parent = nullptr);
 
+    // Point cloud import (PLY / PCD). Формат определяется по расширению.
+    // Возвращает nullptr при ошибке; текст — в lastError().
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr loadPointCloud(const QString &filename);
+
     // Point cloud export.
     bool savePointCloud(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr &cloud,
                         const QString &filename,

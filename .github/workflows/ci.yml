@@ -1,0 +1,58 @@
+name: CI Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------- Linux (emulation-only, без OpenNI2 и CUDA) ----------
+  linux-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libqt6-dev qt6-base-dev libqt6opengl6-dev libqt6concurrent6 \
+            libopencv-dev \
+            libpcl-dev \
+            libvtk9-dev libvtk9-qt-dev \
+            libeigen3-dev libflann-dev libboost-all-dev
+
+      - name: Configure (emulation-only)
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DASTRA_ENABLE_OPENNI2=OFF \
+            -DASTRA_ENABLE_CUDA=OFF
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Verify executable
+        run: |
+          test -f build/AstraScanner
+          echo "✅ AstraScanner binary built successfully"
+
+      - name: Check source structure
+        run: |
+          for f in \
+            src/main.cpp \
+            src/gui/MainWindow.cpp \
+            src/gui/SettingsDialog.cpp \
+            src/capture/AstraCamera.cpp \
+            src/capture/CaptureWorker.cpp \
+            src/filters/PointCloudFilters.cpp \
+            src/accel/GpuAccelerator.cpp \
+            src/history/CloudHistory.cpp \
+            src/settings/SettingsManager.cpp \
+            src/export/ExportManager.cpp \
+            src/project/ProjectManager.cpp; do
+            test -f "$f" || { echo "❌ Missing: $f"; exit 1; }
+          done
+          echo "✅ All source files present"

@@ -160,6 +160,36 @@ void MainWindow::setupUI()
     connect(exportCloudAct, &QAction::triggered, this, &MainWindow::onExportCurrentCloud);
     connect(exportMeshAct,  &QAction::triggered, this, &MainWindow::onExportMesh);
 
+    QMenu *importMenu = menuBar()->addMenu("&Импорт");
+    QAction *importCloudAct = importMenu->addAction("Импорт облака (PLY / PCD)…");
+    importCloudAct->setShortcut(QKeySequence("Ctrl+I"));
+    connect(importCloudAct, &QAction::triggered, this, [this]() {
+        const QString baseDir = SettingsManager::instance().lastExportDirectory();
+        const QString filename = QFileDialog::getOpenFileName(
+            this, "Импорт облака точек", baseDir,
+            "Point clouds (*.ply *.pcd);;Stanford Polygon (*.ply);;PCD (*.pcd)");
+        if (filename.isEmpty()) return;
+        SettingsManager::instance().setLastExportDirectory(QFileInfo(filename).absolutePath());
+
+        auto cloud = m_exporter->loadPointCloud(filename);
+        if (!cloud) {
+            QMessageBox::warning(this, "Ошибка импорта", m_exporter->lastError());
+            return;
+        }
+
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (m_accumulatedCloud && !m_accumulatedCloud->empty()) {
+                m_cloudHistory->pushState(m_accumulatedCloud, "Импорт");
+            }
+            *m_accumulatedCloud = *cloud;
+        }
+        emit cloudSizeChanged(static_cast<int>(cloud->size()));
+        updateViewer();
+        statusBar()->showMessage(
+            QString("Импортировано: %1 (%2 точек)").arg(filename).arg(cloud->size()), 5000);
+    });
+
     QMenu *settingsMenu = menuBar()->addMenu("&Настройки");
     QAction *settingsAct = settingsMenu->addAction("Параметры…");
     settingsAct->setShortcut(QKeySequence("Ctrl+,"));

@@ -4,6 +4,8 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QDir>
+#include <QLocale>
+#include <QTranslator>
 #include <QSurfaceFormat>
 #include <QMetaObject>
 #include <cstdlib>

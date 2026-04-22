@@ -51,7 +51,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL Concurrent LinguistTools)
 find_package(OpenCV REQUIRED)
 # surface нужен для Poisson-реконструкции; остальные — как и раньше.
 find_package(PCL 1.15 REQUIRED COMPONENTS common io visualization filters registration features surface)
@@ -153,6 +153,18 @@ set(SOURCES
 
 if(ASTRA_HAVE_CUDA)
     list(APPEND SOURCES src/accel/DepthToCloudKernel.cu)
+endif()
+
+# --- Переводы (i18n) ---
+# .ts файлы создаются/обновляются через: cmake --build build --target update_translations
+# .qm файлы генерируются автоматически при сборке.
+set(TS_FILES
+    translations/astrascanner_ru.ts
+    translations/astrascanner_en.ts
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/translations")
+    qt6_add_translations(${PROJECT_NAME} TS_FILES ${TS_FILES}
+        RESOURCE_PREFIX "/translations")
 endif()
 
 # На Windows GUI-приложение скрывает консоль (WIN32_EXECUTABLE / /SUBSYSTEM:WINDOWS);
