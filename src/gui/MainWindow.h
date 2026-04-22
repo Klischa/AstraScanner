@@ -89,6 +89,11 @@ private slots:
     void onShowCloudClicked();
     void onPoissonFinished();
 
+    // --- ICP-регистрация ---
+    void onMergeScansClicked(const PointCloudFilters::MergeParams &params);
+    void onMergeFinished();
+    void onSaveMergedToProject();
+
 private:
     void setupUI();
     void setupVisualizer();
@@ -161,6 +166,15 @@ private:
     // Watcher для QtConcurrent::run — чтобы не потерять future и корректно
     // эмитить onPoissonFinished() в GUI-потоке.
     QFutureWatcher<pcl::PolygonMesh> *m_poissonWatcher = nullptr;
+
+    // ICP-регистрация
+    QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> *m_mergeWatcher = nullptr;
+    QPushButton *m_mergeBtn = nullptr;
+    QPushButton *m_addMergedBtn = nullptr;
+    QLabel *m_icpStatusLabel = nullptr;
+    // Последний результат ICP-мержа, готовый к записи в проект как новый
+    // скан. Null — результата ещё нет.
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr m_lastMerged;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений

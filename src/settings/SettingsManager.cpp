@@ -11,6 +11,10 @@ constexpr const char *kSorMeanK          = "filters/sorMeanK";
 constexpr const char *kSorStddev         = "filters/sorStddevMul";
 constexpr const char *kRorRadius         = "filters/rorRadius";
 constexpr const char *kRorMinNeighbors   = "filters/rorMinNeighbors";
+constexpr const char *kIcpMaxCorrDist    = "icp/maxCorrespondenceDistance";
+constexpr const char *kIcpMaxIter        = "icp/maxIterations";
+constexpr const char *kIcpSkipNonConv    = "icp/skipNonConverged";
+constexpr const char *kIcpVoxelOut       = "icp/voxelLeafOut";
 constexpr const char *kPoissonDepth      = "poisson/depth";
 constexpr const char *kPoissonPointWt    = "poisson/pointWeight";
 constexpr const char *kPoissonSamples    = "poisson/samplesPerNode";
@@ -114,6 +118,46 @@ int SettingsManager::rorMinNeighbors() const
 void SettingsManager::setRorMinNeighbors(int n)
 {
     setValue(kRorMinNeighbors, n);
+}
+
+double SettingsManager::icpMaxCorrespondenceDistance() const
+{
+    return m_settings.value(kIcpMaxCorrDist, 0.05).toDouble();
+}
+
+void SettingsManager::setIcpMaxCorrespondenceDistance(double meters)
+{
+    setValue(kIcpMaxCorrDist, meters);
+}
+
+int SettingsManager::icpMaxIterations() const
+{
+    return m_settings.value(kIcpMaxIter, 50).toInt();
+}
+
+void SettingsManager::setIcpMaxIterations(int n)
+{
+    setValue(kIcpMaxIter, n);
+}
+
+bool SettingsManager::icpSkipNonConverged() const
+{
+    return m_settings.value(kIcpSkipNonConv, false).toBool();
+}
+
+void SettingsManager::setIcpSkipNonConverged(bool skip)
+{
+    setValue(kIcpSkipNonConv, skip);
+}
+
+double SettingsManager::icpVoxelLeafOut() const
+{
+    return m_settings.value(kIcpVoxelOut, 0.0).toDouble();
+}
+
+void SettingsManager::setIcpVoxelLeafOut(double meters)
+{
+    setValue(kIcpVoxelOut, meters);
 }
 
 int SettingsManager::poissonDepth() const

@@ -138,24 +138,63 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::registerPointCloudsICP
 }
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::mergeScans(
-    const std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &scans)
+    const std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &scans,
+    const MergeParams &params)
 {
     if (scans.empty()) return pcl::PointCloud<pcl::PointXYZRGB>::Ptr(new pcl::PointCloud<pcl::PointXYZRGB>);
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr merged(new pcl::PointCloud<pcl::PointXYZRGB>);
-    *merged = *scans[0];
+    // Первый скан — опорный, выравнивать его не к чему.
+    if (scans[0] && !scans[0]->empty()) *merged = *scans[0];
+
+    int converged = 0;
+    int skipped = 0;
+    int addedAsIs = 0;
 
     for (size_t i = 1; i < scans.size(); ++i) {
         emit progressUpdated(static_cast<int>((i * 100) / scans.size()));
 
-        if (!scans[i] || scans[i]->empty()) continue;
+        const auto &src = scans[i];
+        if (!src || src->empty() || merged->empty()) continue;
 
-        auto aligned = registerPointCloudsICP(scans[i], merged);
-        *merged += *aligned;
+        pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
+        icp.setInputSource(src);
+        icp.setInputTarget(merged);
+        icp.setMaxCorrespondenceDistance(params.maxCorrespondenceDistance);
+        icp.setMaximumIterations(params.maximumIterations);
+        icp.setTransformationEpsilon(1e-8);
+        icp.setEuclideanFitnessEpsilon(1e-8);
+
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZRGB>);
+        icp.align(*aligned);
+
+        if (icp.hasConverged()) {
+            *merged += *aligned;
+            ++converged;
+            qInfo() << "[mergeScans] scan" << i << "converged, score"
+                    << icp.getFitnessScore();
+        } else if (params.skipNonConverged) {
+            ++skipped;
+            qWarning() << "[mergeScans] scan" << i << "ICP did not converge — skipped";
+        } else {
+            // ICP не сошёлся — добавляем исходное облако без трансформации.
+            // Это даст хоть какой-то результат, но ожидаемо будет double-wall.
+            *merged += *src;
+            ++addedAsIs;
+            qWarning() << "[mergeScans] scan" << i
+                       << "ICP did not converge — added as-is (expect misalignment)";
+        }
+    }
+
+    if (params.voxelLeafOut > 0.0) {
+        merged = applyVoxelGrid(merged, static_cast<float>(params.voxelLeafOut));
     }
 
     emit progressUpdated(100);
-    qInfo() << "Merged" << scans.size() << "scans into" << merged->size() << "points";
+    qInfo() << "Merged" << scans.size() << "scans into" << merged->size()
+            << "points (converged=" << converged
+            << ", skipped=" << skipped
+            << ", added-as-is=" << addedAsIs << ")";
     return merged;
 }
 
