@@ -29,6 +29,7 @@ find_package(VTK REQUIRED COMPONENTS
     CommonCore
     FiltersSources
     InteractionStyle
+    RenderingCore
     RenderingOpenGL2
     RenderingQt
     GUISupportQt
@@ -79,6 +80,7 @@ set(SOURCES
     src/settings/SettingsManager.cpp
     src/export/ExportManager.cpp
     src/project/ProjectManager.cpp
+    src/editor/PointCloudEditor.cpp
 )
 
 add_executable(${PROJECT_NAME} WIN32 ${SOURCES})

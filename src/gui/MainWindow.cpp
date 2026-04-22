@@ -6,6 +6,7 @@
 #include "../settings/SettingsManager.h"
 #include "../export/ExportManager.h"
 #include "../project/ProjectManager.h"
+#include "../editor/PointCloudEditor.h"
 
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -71,6 +72,39 @@ MainWindow::MainWindow(QWidget* parent)
 
     setupUI();
     setupVisualizer();
+
+    // Ручное редактирование облака (лассо).
+    m_editor = new PointCloudEditor(this);
+    m_editor->attach(m_viewer, m_vtkWidget);
+    connect(m_editor, &PointCloudEditor::cloudModified, this, [this](int newSize) {
+        emit cloudSizeChanged(newSize);
+    });
+    connect(m_editor, &PointCloudEditor::selectionChanged, this, [this](int count) {
+        if (m_editorStatusLabel) {
+            if (count > 0)
+                m_editorStatusLabel->setText(QString("Выделено: %1 точек").arg(count));
+            else
+                m_editorStatusLabel->setText("");
+        }
+        // Активация кнопок операций.
+        const bool hasSel = count > 0;
+        if (m_edDeleteBtn) m_edDeleteBtn->setEnabled(hasSel);
+        if (m_edCropBtn)   m_edCropBtn->setEnabled(hasSel);
+        if (m_edInvertBtn) m_edInvertBtn->setEnabled(true);
+        if (m_edClearBtn)  m_edClearBtn->setEnabled(hasSel);
+    });
+    connect(m_editor, &PointCloudEditor::editModeChanged, this, [this](bool on) {
+        if (!on) {
+            if (m_edDeleteBtn) m_edDeleteBtn->setEnabled(false);
+            if (m_edCropBtn)   m_edCropBtn->setEnabled(false);
+            if (m_edInvertBtn) m_edInvertBtn->setEnabled(false);
+            if (m_edClearBtn)  m_edClearBtn->setEnabled(false);
+            if (m_edUndoBtn)   m_edUndoBtn->setEnabled(false);
+        }
+    });
+    connect(m_editor, &PointCloudEditor::cloudModified, this, [this](int) {
+        if (m_edUndoBtn) m_edUndoBtn->setEnabled(m_editor->canUndo());
+    });
 
     m_viewerUpdateTimer = new QTimer(this);
     connect(m_viewerUpdateTimer, &QTimer::timeout, this, &MainWindow::updateViewer);
@@ -545,6 +579,78 @@ void MainWindow::setupUI()
     meshLayout->addWidget(m_meshStatusLabel);
 
     processingLayout->addWidget(meshGroup);
+
+    // --- Ручное редактирование (лассо) ---
+    QGroupBox *editorGroup = new QGroupBox("Ручное редактирование (лассо)", this);
+    QVBoxLayout *editorLayout = new QVBoxLayout(editorGroup);
+
+    m_editModeBtn = new QPushButton("Включить режим редактирования", this);
+    m_editModeBtn->setCheckable(true);
+    m_editModeBtn->setToolTip("В режиме редактирования ЛКМ рисует лассо вместо вращения камеры.\n"
+                              "Обведите область точек для выделения, затем выполните операцию.\n"
+                              "ПКМ / колесо — вращение / масштаб работают как обычно.");
+    editorLayout->addWidget(m_editModeBtn);
+
+    QHBoxLayout *editorBtnRow = new QHBoxLayout();
+    QPushButton *edDeleteBtn  = new QPushButton("Удалить выделенное", this);
+    QPushButton *edCropBtn    = new QPushButton("Оставить выделенное", this);
+    QPushButton *edInvertBtn  = new QPushButton("Инвертировать", this);
+    QPushButton *edClearBtn   = new QPushButton("Снять выделение", this);
+    QPushButton *edUndoBtn    = new QPushButton("Отменить", this);
+    edDeleteBtn->setEnabled(false);
+    edCropBtn->setEnabled(false);
+    edInvertBtn->setEnabled(false);
+    edClearBtn->setEnabled(false);
+    edUndoBtn->setEnabled(false);
+    editorBtnRow->addWidget(edDeleteBtn);
+    editorBtnRow->addWidget(edCropBtn);
+    editorBtnRow->addWidget(edInvertBtn);
+    editorBtnRow->addWidget(edClearBtn);
+    editorBtnRow->addWidget(edUndoBtn);
+    editorBtnRow->addStretch();
+    editorLayout->addLayout(editorBtnRow);
+
+    m_editorStatusLabel = new QLabel("", this);
+    editorLayout->addWidget(m_editorStatusLabel);
+
+    processingLayout->addWidget(editorGroup);
+
+    // Кнопка режима — toggle.
+    connect(m_editModeBtn, &QPushButton::toggled, this, [this](bool checked) {
+        if (checked) {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+                QMessageBox::information(this, "Редактирование",
+                    "Облако пустое. Сначала загрузите или отсканируйте облако.");
+                m_editModeBtn->setChecked(false);
+                return;
+            }
+            m_editor->setCloud(m_accumulatedCloud);
+            m_editor->setEditMode(true);
+            m_editModeBtn->setText("Выключить режим редактирования");
+            // Показываем облако в вьюаре (на случай, если был меш).
+            locker.unlock();
+            onShowCloudClicked();
+        } else {
+            m_editor->setEditMode(false);
+            m_editModeBtn->setText("Включить режим редактирования");
+        }
+    });
+
+    // Кнопки операций — через лямбды, т.к. m_editor создаётся после setupUI.
+    connect(edDeleteBtn, &QPushButton::clicked, this, [this]() { if (m_editor) m_editor->deleteSelected(); });
+    connect(edCropBtn,   &QPushButton::clicked, this, [this]() { if (m_editor) m_editor->cropToSelected(); });
+    connect(edInvertBtn, &QPushButton::clicked, this, [this]() { if (m_editor) m_editor->invertSelection(); });
+    connect(edClearBtn,  &QPushButton::clicked, this, [this]() { if (m_editor) m_editor->clearSelection(); });
+    connect(edUndoBtn,   &QPushButton::clicked, this, [this]() { if (m_editor) m_editor->undo(); });
+
+    // Сохраняем указатели на кнопки редактора, чтобы подключить сигналы
+    // m_editor -> кнопки после создания m_editor в конструкторе.
+    m_edDeleteBtn = edDeleteBtn;
+    m_edCropBtn   = edCropBtn;
+    m_edInvertBtn = edInvertBtn;
+    m_edClearBtn  = edClearBtn;
+    m_edUndoBtn   = edUndoBtn;
 
     // Прогресс Poisson — через `progressUpdated` от PointCloudFilters. Он
     // эмитится и при ICP-мерже, чтобы не было путаницы между индикаторами,

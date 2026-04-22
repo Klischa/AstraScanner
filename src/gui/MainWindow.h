@@ -33,6 +33,7 @@ class LiveCloudWindow;
 class PointCloudFilters;
 class ProjectManager;
 class ExportManager;
+class PointCloudEditor;
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
@@ -175,6 +176,16 @@ private:
     // Последний результат ICP-мержа, готовый к записи в проект как новый
     // скан. Null — результата ещё нет.
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr m_lastMerged;
+
+    // Ручное редактирование (лассо)
+    PointCloudEditor *m_editor = nullptr;
+    QPushButton *m_editModeBtn = nullptr;
+    QLabel *m_editorStatusLabel = nullptr;
+    QPushButton *m_edDeleteBtn = nullptr;
+    QPushButton *m_edCropBtn = nullptr;
+    QPushButton *m_edInvertBtn = nullptr;
+    QPushButton *m_edClearBtn = nullptr;
+    QPushButton *m_edUndoBtn = nullptr;
 };
 
 // Глобальный указатель на главное окно, используется обработчиком сообщений
