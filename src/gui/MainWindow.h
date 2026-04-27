@@ -17,6 +17,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/PolygonMesh.h>
 #include <QFutureWatcher>
+#include <QFuture>
 #include <QPolygonF>
 #include <opencv2/opencv.hpp>
 
@@ -216,6 +217,15 @@ private:
     QSpinBox        *m_turntableCountSpin = nullptr;
     QLabel          *m_turntableStatusLabel = nullptr;
     int              m_turntableCaptured = 0;
+
+    // Кнопки фильтров (SOR, ROR, Voxel, MagicWand) — хранятся как члены,
+    // чтобы блокировать все одновременно при запуске любого фильтра.
+    QPushButton *m_sorBtn = nullptr;
+    QPushButton *m_rorBtn = nullptr;
+    QPushButton *m_voxelBtn = nullptr;
+    QPushButton *m_magicWandBtn = nullptr;
+    QFuture<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> m_pendingFilterFuture;
+    void setFilterButtonsEnabled(bool enabled);
 
     // Лассо-редактирование облака точек
     vtkSmartPointer<vtkRenderer>  m_vtkRenderer;  // дубль из setupVisualizer
