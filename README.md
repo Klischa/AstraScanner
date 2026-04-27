@@ -11,7 +11,7 @@
 
 | Функция | Описание |
 |---------|----------|
-| Захват | Одновременный вывод RGB и depth с Astra Pro через OpenNI2 + UVC (OpenCV). Emulation-режим при отсутствии камеры или при сборке с `-DASTRA_ENABLE_OPENNI2=OFF`. |
+| Захват | Одновременный вывод RGB и depth с Astra Pro через OpenNI2 + UVC (OpenCV). Emulation-режим при отсутствии камеры или при сборке с `-DASTRA_ENABLE_OPENNI2=OFF`. Потокобезопасный захват: `m_running` / `m_cloudProcessingEnabled` — `std::atomic<bool>`. |
 | Калибровка | По шахматной доске (OpenCV). Интринсики сохраняются вместе с `image_size` и масштабируются под реальное разрешение depth-кадра. |
 | Накопление облака | В реальном времени, с паузой, сбросом и индикатором расстояния. |
 | Turntable mode | Режим «поворотный стол» на вкладке «Сканирование»: задаются интервал (сек) и число сканов, по таймеру текущее облако автоматически сохраняется как отдельный скан проекта и накопитель очищается. |
@@ -20,12 +20,12 @@
 | Нормали | `pcl::NormalEstimationOMP` (многопоточно) с поддержкой как radius search (`normalSearchRadius`), так и k-nearest (`kNearest`). View-point по умолчанию берётся как центроид облака минус 1 м по Z; можно задать опциональный custom view-point (X/Y/Z) и флаги «Инвертировать нормали» / «Согласованная ориентация (BFS по k-соседям)». |
 | Poisson-реконструкция | `pcl::Poisson` с полным набором параметров: `depth`, `minDepth`, `pointWeight`, `samplesPerNode`, `scale`, `confidence`, `outputPolygons`, `normalSearchRadius`, `kNearest`. Меш рисуется в том же VTK-виджете. |
 | ICP-регистрация | `pcl::IterativeClosestPoint` попарно по сканам проекта, c параметрами `maxCorrespondenceDistance` / `maxIterations`, опциональной децимацией результата через voxel-grid и режимом «skip non-converged». |
-| Проект | `ProjectManager`: директория с `project.json` (`formatVersion=1`) + `scans/*.ply`, add / remove / rename / ленивая загрузка сканов. |
+| Проект | `ProjectManager`: директория с `project.json` (`formatVersion=1`) + `scans/*.ply`, add / remove / rename / ленивая загрузка сканов. Валидация `formatVersion`, путей сканов (path traversal) и полей JSON при чтении метаданных. |
 | Экспорт | `ExportManager`: облака — PLY (бинарный, с цветом) или PCD; меш — PLY / STL / OBJ. Автодетект формата по расширению. |
 | Диалог настроек | GUI-диалог «Настройки → Параметры…» (`Ctrl+,`, `SettingsDialog`) собирает все параметры `QSettings` (сканирование, фильтры, ICP, Poisson, пути) в одно окно с OK / Cancel / Apply / Reset to defaults. |
 | Настройки | `SettingsManager` (QSettings) — хранит параметры ICP / Poisson / фильтров / директории экспорта и проектов между запусками. |
-| Асинхронные операции | Poisson и ICP-merge выполняются в `QtConcurrent::run` + `QFutureWatcher`, GUI не блокируется. |
-| Логирование | Qt `messageHandler` → `logs/scanner.log` + отдельная вкладка «Логи» в GUI. |
+| Асинхронные операции | Poisson, ICP-merge и фильтры (SOR / ROR / Voxel / Magic Wand) выполняются в `QtConcurrent::run` + `QFutureWatcher`, GUI не блокируется. Параллельный запуск нескольких фильтров заблокирован — кнопки отключаются до завершения текущей операции. |
+| Логирование | Qt `messageHandler` → `logs/scanner.log` (ротация: >10 МБ → `.old`) + отдельная вкладка «Логи» в GUI. |
 
 ---
 
@@ -37,7 +37,7 @@
 | Тулчейн | Visual Studio 2022 (MSVC v143) / GCC / Clang, CMake 3.22+, Ninja опционально. |
 | Стандарт C++ | C++17 (`set(CMAKE_CXX_STANDARD 17)` в `CMakeLists.txt`). |
 | Qt | Qt 6 (модули `Core`, `Widgets`, `OpenGL`, `Concurrent`). |
-| PCL | **PCL ≥ 1.15** (`find_package(PCL 1.15 REQUIRED ...)`), компоненты `common io visualization filters registration features surface`. |
+| PCL | **PCL ≥ 1.12** (`find_package(PCL 1.12 REQUIRED ...)`), компоненты `common io visualization filters registration features surface`. |
 | VTK | `CommonCore`, `FiltersSources`, `InteractionStyle`, `RenderingOpenGL2`, `RenderingQt`, `GUISupportQt`. |
 | OpenCV | 4.x. |
 | CPU | Intel Core i5 / AMD Ryzen 5. |
@@ -64,7 +64,7 @@ C:\dev\vcpkg\vcpkg integrate install
 vcpkg install qt6-base qt6-opengl qt6-concurrent opencv4 pcl[core,visualization,surface,registration] vtk
 ```
 
-> Нужны **PCL ≥ 1.15** с компонентами `common io visualization filters registration features surface` (последний — для Poisson) и Qt-модули `Core Widgets OpenGL Concurrent`.
+> Нужны **PCL ≥ 1.12** с компонентами `common io visualization filters registration features surface` (последний — для Poisson) и Qt-модули `Core Widgets OpenGL Concurrent`.
 
 ### 3. OpenNI2 SDK (опционально)
 
@@ -148,7 +148,7 @@ Runtime-директории, создаваемые автоматически 
 ```
 data/                            — camera_calibration.xml (интринсики после калибровки)
 projects/                        — директория проектов по умолчанию
-logs/                            — scanner.log (ротации нет, дописывается)
+logs/                            — scanner.log (ротация >10 МБ → scanner.log.old)
 ```
 
 ---
@@ -201,7 +201,7 @@ logs/                            — scanner.log (ротации нет, доп�
 - **Voxel Grid** — прореживает облако. `leafSize=0.005 м` (дефолт, выставляемый из GUI при ручном прореживании) / `0.002 м` (`SettingsManager::voxelLeafSize` — используется турtable/ICP-пайплайном по умолчанию).
 - **Magic Wand** — Voxel + SOR одним нажатием.
 
-Параметры по умолчанию читаются из `SettingsManager` и перезаписываются при каждом изменении.
+Параметры по умолчанию читаются из `SettingsManager` и перезаписываются при каждом изменении. Все фильтры выполняются асинхронно (`QtConcurrent::run`), кнопки блокируются до завершения текущей операции.
 
 ### Ручное редактирование лассо
 
