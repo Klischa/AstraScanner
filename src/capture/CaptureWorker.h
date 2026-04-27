@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QSharedPointer>
+#include <atomic>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -34,8 +35,8 @@ signals:
     void finished();
 
 private:
-    bool m_running = true;
-    bool m_cloudProcessingEnabled = true;
+    std::atomic<bool> m_running{true};
+    std::atomic<bool> m_cloudProcessingEnabled{true};
     // Интринсики, *уже* приведённые к разрешению depth-кадра, с которым
     // работает convertToPointCloud. scaleIntrinsicsToDepth() делает пересчёт.
     float m_fx = 570.0f, m_fy = 570.0f, m_cx = 320.0f, m_cy = 240.0f;
