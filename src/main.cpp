@@ -4,6 +4,7 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <QSurfaceFormat>
 #include <QMetaObject>
 #include <cstdlib>
@@ -69,6 +70,18 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
 
     QDir().mkpath("logs");
+
+    // --- Ротация логов: если файл > 10 МБ, переименовать в .old ---
+    {
+        const QString logPath = "logs/scanner.log";
+        QFileInfo fi(logPath);
+        if (fi.exists() && fi.size() > 10 * 1024 * 1024) {
+            const QString oldPath = "logs/scanner.log.old";
+            QFile::remove(oldPath);
+            QFile::rename(logPath, oldPath);
+        }
+    }
+
     g_logFile.setFileName("logs/scanner.log");
     if (!g_logFile.open(QIODevice::Append | QIODevice::Text)) {
         QTextStream(stderr) << "Failed to open log file" << Qt::endl;

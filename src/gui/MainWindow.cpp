@@ -59,6 +59,12 @@ MainWindow::MainWindow(QWidget* parent)
     std::error_code ec;
     std::filesystem::create_directories("data", ec);
 
+    // Создаём дефолтную директорию проектов, если она ещё не существует.
+    {
+        const QString projDir = SettingsManager::instance().projectsDirectory();
+        QDir().mkpath(projDir);
+    }
+
     m_filters = new PointCloudFilters(this);
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
@@ -730,46 +736,113 @@ void MainWindow::setupUI()
     connect(showCloudBtn, &QPushButton::clicked, this, &MainWindow::onShowCloudClicked);
     connect(exportMeshBtnP, &QPushButton::clicked, this, &MainWindow::onExportMesh);
 
-    connect(sorBtn, &QPushButton::clicked, this, [this, sorMeanKSpin, sorThreshSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    connect(sorBtn, &QPushButton::clicked, this, [this, sorBtn, sorMeanKSpin, sorThreshSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        sorBtn->setEnabled(false);
+        const int meanK = sorMeanKSpin->value();
+        const double thresh = sorThreshSpin->value();
 
-        auto filtered = m_filters->applyStatisticalOutlierRemoval(
-            m_accumulatedCloud, sorMeanKSpin->value(), sorThreshSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+        auto *watcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished, this, [this, watcher, sorBtn]() {
+            auto filtered = watcher->result();
+            {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+            }
+            emit cloudSizeChanged(static_cast<int>(filtered->size()));
+            updateViewer();
+            sorBtn->setEnabled(true);
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([this, snapshot, meanK, thresh]() {
+            return m_filters->applyStatisticalOutlierRemoval(snapshot, meanK, thresh);
+        }));
     });
 
-    connect(rorBtn, &QPushButton::clicked, this, [this, rorRadiusSpin, rorNeighborsSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    connect(rorBtn, &QPushButton::clicked, this, [this, rorBtn, rorRadiusSpin, rorNeighborsSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        rorBtn->setEnabled(false);
+        const double radius = rorRadiusSpin->value();
+        const int neighbors = rorNeighborsSpin->value();
 
-        auto filtered = m_filters->applyRadiusOutlierRemoval(
-            m_accumulatedCloud, rorRadiusSpin->value(), rorNeighborsSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+        auto *watcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished, this, [this, watcher, rorBtn]() {
+            auto filtered = watcher->result();
+            {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+            }
+            emit cloudSizeChanged(static_cast<int>(filtered->size()));
+            updateViewer();
+            rorBtn->setEnabled(true);
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([this, snapshot, radius, neighbors]() {
+            return m_filters->applyRadiusOutlierRemoval(snapshot, radius, neighbors);
+        }));
     });
 
-    connect(voxelBtn, &QPushButton::clicked, this, [this, voxelSizeSpin]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    connect(voxelBtn, &QPushButton::clicked, this, [this, voxelBtn, voxelSizeSpin]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        voxelBtn->setEnabled(false);
+        const double leafSize = voxelSizeSpin->value();
 
-        auto filtered = m_filters->applyVoxelGrid(m_accumulatedCloud, voxelSizeSpin->value());
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+        auto *watcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished, this, [this, watcher, voxelBtn]() {
+            auto filtered = watcher->result();
+            {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+            }
+            emit cloudSizeChanged(static_cast<int>(filtered->size()));
+            updateViewer();
+            voxelBtn->setEnabled(true);
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([this, snapshot, leafSize]() {
+            return m_filters->applyVoxelGrid(snapshot, leafSize);
+        }));
     });
 
-    connect(magicWandBtn, &QPushButton::clicked, this, [this]() {
-        QMutexLocker locker(&m_cloudMutex);
-        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+    connect(magicWandBtn, &QPushButton::clicked, this, [this, magicWandBtn]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        magicWandBtn->setEnabled(false);
 
-        auto filtered = m_filters->applyMagicWand(m_accumulatedCloud);
-        *m_accumulatedCloud = *filtered;
-        emit cloudSizeChanged(static_cast<int>(m_accumulatedCloud->size()));
-        updateViewer();
+        auto *watcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished, this, [this, watcher, magicWandBtn]() {
+            auto filtered = watcher->result();
+            {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *filtered;
+            }
+            emit cloudSizeChanged(static_cast<int>(filtered->size()));
+            updateViewer();
+            magicWandBtn->setEnabled(true);
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([this, snapshot]() {
+            return m_filters->applyMagicWand(snapshot);
+        }));
     });
 
     connect(mergeScansBtn, &QPushButton::clicked, this,

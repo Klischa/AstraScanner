@@ -263,14 +263,27 @@ bool ProjectManager::readMetadata()
         return false;
     }
     const QJsonObject root = doc.object();
+
+    // --- Валидация схемы ---
+    const int formatVersion = root.value("formatVersion").toInt(0);
+    if (formatVersion < 1) {
+        m_lastError = QString("Неизвестный или отсутствующий formatVersion: %1").arg(formatVersion);
+        return false;
+    }
+
     m_projectName = root.value("name").toString(QFileInfo(m_projectDir).fileName());
 
     m_scans.clear();
     for (const QJsonValue &v : root.value("scans").toArray()) {
         const QJsonObject s = v.toObject();
+        const QString filePath = s.value("file").toString();
+        if (filePath.isEmpty()) {
+            qWarning() << "[Project] Пропущен скан без поля 'file'";
+            continue;
+        }
         ScanItem item;
-        item.name = s.value("name").toString();
-        item.relativeFilePath = s.value("file").toString();
+        item.name = s.value("name").toString(QStringLiteral("Unnamed"));
+        item.relativeFilePath = filePath;
         item.createdAt = QDateTime::fromString(s.value("createdAt").toString(), Qt::ISODate);
         item.pointCount = s.value("pointCount").toInt();
         m_scans.append(item);
@@ -285,6 +298,16 @@ bool ProjectManager::saveScanToDisk(ScanItem &item)
         return false;
     }
     const QString fullPath = QDir(m_projectDir).filePath(item.relativeFilePath);
+
+    // --- Проверка path traversal ---
+    const QString canonical = QFileInfo(fullPath).absoluteFilePath();
+    const QString projectCanonical = QFileInfo(m_projectDir).absoluteFilePath();
+    if (!canonical.startsWith(projectCanonical + "/") && canonical != projectCanonical) {
+        m_lastError = QString("Путь скана выходит за пределы директории проекта: %1").arg(fullPath);
+        qWarning() << "[Project]" << m_lastError;
+        return false;
+    }
+
     // Убеждаемся, что директория существует.
     QFileInfo(fullPath).absoluteDir().mkpath(".");
 
@@ -307,6 +330,16 @@ bool ProjectManager::loadScanFromDisk(ScanItem &item)
     const QString fullPath = QFileInfo(item.relativeFilePath).isAbsolute()
                                  ? item.relativeFilePath
                                  : QDir(m_projectDir).filePath(item.relativeFilePath);
+
+    // --- Проверка path traversal ---
+    const QString canonical = QFileInfo(fullPath).canonicalFilePath();
+    const QString projectCanonical = QFileInfo(m_projectDir).canonicalFilePath();
+    if (!canonical.isEmpty() && !canonical.startsWith(projectCanonical + "/") && canonical != projectCanonical) {
+        m_lastError = QString("Путь скана выходит за пределы директории проекта: %1").arg(fullPath);
+        qWarning() << "[Project]" << m_lastError;
+        return false;
+    }
+
     if (!QFile::exists(fullPath)) {
         m_lastError = QString("Файл скана не найден: %1").arg(fullPath);
         return false;
