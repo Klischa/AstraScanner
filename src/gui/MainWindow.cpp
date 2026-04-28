@@ -65,6 +65,8 @@ MainWindow::MainWindow(QWidget* parent)
         QDir().mkpath(projDir);
     }
 
+    m_frameSkip = SettingsManager::instance().frameSkip();
+
     m_filters = new PointCloudFilters(this);
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
@@ -383,12 +385,12 @@ void MainWindow::setupUI()
     QLabel* sorLabel = new QLabel("SOR (mean K):", this);
     QSpinBox* sorMeanKSpin = new QSpinBox(this);
     sorMeanKSpin->setRange(10, 100);
-    sorMeanKSpin->setValue(50);
+    sorMeanKSpin->setValue(SettingsManager::instance().sorMeanK());
     QLabel* sorThreshLabel = new QLabel("порог:", this);
     QDoubleSpinBox* sorThreshSpin = new QDoubleSpinBox(this);
     sorThreshSpin->setRange(0.1, 5.0);
     sorThreshSpin->setSingleStep(0.1);
-    sorThreshSpin->setValue(1.0);
+    sorThreshSpin->setValue(SettingsManager::instance().sorStddevMul());
     QPushButton* sorBtn = m_sorBtn = new QPushButton("Применить SOR", this);
     sorLayout->addWidget(sorLabel);
     sorLayout->addWidget(sorMeanKSpin);
@@ -403,11 +405,11 @@ void MainWindow::setupUI()
     QDoubleSpinBox* rorRadiusSpin = new QDoubleSpinBox(this);
     rorRadiusSpin->setRange(0.001, 0.1);
     rorRadiusSpin->setSingleStep(0.001);
-    rorRadiusSpin->setValue(0.02);
+    rorRadiusSpin->setValue(SettingsManager::instance().rorRadius());
     QLabel* rorNeighborsLabel = new QLabel("мин. соседей:", this);
     QSpinBox* rorNeighborsSpin = new QSpinBox(this);
     rorNeighborsSpin->setRange(1, 50);
-    rorNeighborsSpin->setValue(10);
+    rorNeighborsSpin->setValue(SettingsManager::instance().rorMinNeighbors());
     QPushButton* rorBtn = m_rorBtn = new QPushButton("Применить ROR", this);
     rorLayout->addWidget(rorLabel);
     rorLayout->addWidget(rorRadiusSpin);
@@ -422,7 +424,7 @@ void MainWindow::setupUI()
     QDoubleSpinBox* voxelSizeSpin = new QDoubleSpinBox(this);
     voxelSizeSpin->setRange(0.001, 0.05);
     voxelSizeSpin->setSingleStep(0.001);
-    voxelSizeSpin->setValue(0.005);
+    voxelSizeSpin->setValue(SettingsManager::instance().voxelLeafSize());
     QPushButton* voxelBtn = m_voxelBtn = new QPushButton("Применить воксель", this);
     voxelLayout->addWidget(voxelLabel);
     voxelLayout->addWidget(voxelSizeSpin);
@@ -707,11 +709,13 @@ void MainWindow::setupUI()
 
     processingLayout->addWidget(meshGroup);
 
-    // Прогресс Poisson — через `progressUpdated` от PointCloudFilters. Он
-    // эмитится и при ICP-мерже, чтобы не было путаницы между индикаторами,
-    // сбрасываем значение при начале реконструкции.
+    // progressUpdated используется и для Poisson, и для ICP. Направляем
+    // обновления только в тот индикатор, который сейчас актуален.
     connect(m_filters, &PointCloudFilters::progressUpdated,
-            m_poissonProgress, &QProgressBar::setValue);
+            this, [this](int pct) {
+                if (m_activeProgressBar)
+                    m_activeProgressBar->setValue(pct);
+            });
 
     connect(reconstructBtn, &QPushButton::clicked, this,
         [this, depthSpin, pointWeightSpin, samplesSpin, normalRadiusSpin, kNearestSpin, reconstructBtn]() {
@@ -878,7 +882,7 @@ void MainWindow::setupUI()
 
     connect(addMergedBtn, &QPushButton::clicked, this, &MainWindow::onSaveMergedToProject);
 
-    connect(m_filters, &PointCloudFilters::progressUpdated, registrationProgress, &QProgressBar::setValue);
+    m_icpProgress = registrationProgress;
     connect(m_filters, &PointCloudFilters::filterCompleted, this, [this](const QString &filter, int before, int after) {
         statusBar()->showMessage(QString("%1: %2 -> %3 точек").arg(filter).arg(before).arg(after), 3000);
     });
@@ -1015,7 +1019,7 @@ void MainWindow::onScanClicked()
     emit cloudSizeChanged(0);
     qDebug() << "Scan started";
 
-    m_scanTimeoutTimer->start(5 * 60 * 1000);
+    m_scanTimeoutTimer->start(SettingsManager::instance().scanTimeoutSec() * 1000);
     startCapture(true);
 }
 
@@ -1097,6 +1101,7 @@ void MainWindow::stopCapture()
 {
     if (m_worker) {
         m_worker->stop();
+        m_worker->disconnect(this);
     }
     if (m_captureThread) {
         m_captureThread->quit();
@@ -1106,6 +1111,7 @@ void MainWindow::stopCapture()
         // состоянии).
         if (!m_captureThread->wait(10000)) {
             qWarning() << "Capture thread did not stop within 10s";
+            m_captureThread->disconnect();
         }
         m_captureThread = nullptr;
     }
@@ -1559,11 +1565,8 @@ void MainWindow::onReconstructMeshClicked(const PointCloudFilters::PoissonParams
         QString("Выполняется реконструкция… (%1 точек, depth=%2)")
             .arg(snapshot->size()).arg(params.depth));
     if (m_poissonProgress) m_poissonProgress->setValue(0);
+    m_activeProgressBar = m_poissonProgress;
     statusBar()->showMessage("Poisson: идёт реконструкция…");
-
-    // Не создаём m_filters заново — он qobject с сигналом progressUpdated,
-    // который уже подключён к m_poissonProgress. Но сам вызов выполняется в
-    // worker-потоке через QtConcurrent::run.
     if (!m_poissonWatcher) {
         m_poissonWatcher = new QFutureWatcher<pcl::PolygonMesh>(this);
         connect(m_poissonWatcher, &QFutureWatcher<pcl::PolygonMesh>::finished,
@@ -1656,6 +1659,8 @@ void MainWindow::onMergeScansClicked(const PointCloudFilters::MergeParams &param
     if (m_addMergedBtn) m_addMergedBtn->setEnabled(false);
     if (m_icpStatusLabel) m_icpStatusLabel->setText(
         QString("Идёт ICP-регистрация %1 сканов…").arg(scans.size()));
+    if (m_icpProgress) m_icpProgress->setValue(0);
+    m_activeProgressBar = m_icpProgress;
     statusBar()->showMessage("ICP: объединение сканов…");
 
     if (!m_mergeWatcher) {

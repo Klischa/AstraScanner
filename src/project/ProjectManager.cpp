@@ -274,11 +274,21 @@ bool ProjectManager::readMetadata()
     m_projectName = root.value("name").toString(QFileInfo(m_projectDir).fileName());
 
     m_scans.clear();
+    const QString projectCanonical = QFileInfo(m_projectDir).absoluteFilePath();
     for (const QJsonValue &v : root.value("scans").toArray()) {
         const QJsonObject s = v.toObject();
         const QString filePath = s.value("file").toString();
         if (filePath.isEmpty()) {
             qWarning() << "[Project] Пропущен скан без поля 'file'";
+            continue;
+        }
+        // --- Проверка path traversal при чтении метаданных ---
+        const QString fullPath = QFileInfo(filePath).isAbsolute()
+                                     ? filePath
+                                     : QDir(m_projectDir).filePath(filePath);
+        const QString scanCanonical = QFileInfo(fullPath).absoluteFilePath();
+        if (!scanCanonical.startsWith(projectCanonical + "/") && scanCanonical != projectCanonical) {
+            qWarning() << "[Project] Пропущен скан с path traversal:" << filePath;
             continue;
         }
         ScanItem item;

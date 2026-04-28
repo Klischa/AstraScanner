@@ -147,7 +147,7 @@ private:
 
     bool m_scanning = false;
     bool m_cloudProcessing = false;
-    int m_frameSkip = 5;
+    int m_frameSkip = 3;
     int m_frameCounter = 0;
     QTimer *m_viewerUpdateTimer = nullptr;
     QTimer *m_scanTimeoutTimer = nullptr;
@@ -184,6 +184,8 @@ private:
     // реконструкции.
     pcl::PolygonMesh m_lastMesh;
     QProgressBar *m_poissonProgress = nullptr;
+    QProgressBar *m_icpProgress = nullptr;
+    QProgressBar *m_activeProgressBar = nullptr;
     QLabel *m_meshStatusLabel = nullptr;
     // Идентификатор меша в PCLVisualizer. Пустая строка = меш не отображён.
     QString m_meshViewerId;
