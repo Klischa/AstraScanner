@@ -1085,6 +1085,11 @@ void MainWindow::startCapture(bool enableCloudProcessing)
     m_worker->moveToThread(m_captureThread);
     m_worker->setCloudProcessingEnabled(enableCloudProcessing);
 
+    const SettingsManager &settings = SettingsManager::instance();
+    m_worker->setDepthRange(static_cast<float>(settings.depthMin()),
+                            static_cast<float>(settings.depthMax()));
+    m_worker->setColorCameraEnabled(settings.colorCameraEnabled());
+
     connect(m_captureThread, &QThread::started, m_worker, &CaptureWorker::process);
     connect(m_worker, &CaptureWorker::frameCaptured, this, &MainWindow::onNewFrame);
     connect(m_worker, &CaptureWorker::pointCloudReady, this, &MainWindow::onPointCloudReady);

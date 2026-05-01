@@ -33,6 +33,7 @@ public:
     std::string getLastError() const { return m_lastError; }
 
     void setEmulationMode(bool enable) { m_emulation = enable; }
+    void setColorCameraEnabled(bool enable) { m_colorEnabled = enable; }
 
 private:
 #ifdef ASTRA_HAVE_OPENNI2
@@ -46,6 +47,7 @@ private:
 
     bool m_initialized = false;
     bool m_emulation = false;
+    bool m_colorEnabled = true;
     std::string m_lastError;
 
     float m_fx = 570.0f, m_fy = 570.0f, m_cx = 320.0f, m_cy = 240.0f;
