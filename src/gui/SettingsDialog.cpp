@@ -97,6 +97,12 @@ void SettingsDialog::buildUi()
     m_depthMax->setToolTip("Максимальная дистанция захвата точек (дальше — отбрасывается).");
     scanForm->addRow("Макс. дистанция:", m_depthMax);
 
+    // Связываем спинбоксы: min не может превысить max и наоборот.
+    connect(m_depthMin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double val) { m_depthMax->setMinimum(val + 0.01); });
+    connect(m_depthMax, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double val) { m_depthMin->setMaximum(val - 0.01); });
+
     m_colorCamera = new QCheckBox("Включить цветную камеру (RGB)", this);
     m_colorCamera->setToolTip("Если выключено, захват идёт только по depth-сенсору; точки будут белыми.");
     scanForm->addRow("", m_colorCamera);

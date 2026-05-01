@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QSharedPointer>
 #include <atomic>
+#include <utility>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -19,7 +20,11 @@ public:
     ~CaptureWorker();
 
     void setCloudProcessingEnabled(bool enabled) { m_cloudProcessingEnabled = enabled; }
-    void setDepthRange(float minMeters, float maxMeters) { m_depthMin = minMeters; m_depthMax = maxMeters; }
+    void setDepthRange(float minMeters, float maxMeters) {
+        if (minMeters >= maxMeters) std::swap(minMeters, maxMeters);
+        m_depthMin = minMeters;
+        m_depthMax = maxMeters;
+    }
     void setColorCameraEnabled(bool enabled) { m_colorCameraEnabled = enabled; }
 
 public slots:
