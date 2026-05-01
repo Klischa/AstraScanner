@@ -167,14 +167,14 @@ if(WIN32)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "--- Copying Qt platforms ---"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${VCPKG_INSTALLED_DIR}/Qt6/plugins/platforms"
+                "$<IF:$<CONFIG:Debug>,${VCPKG_INSTALLED_DIR}/debug/Qt6/plugins/platforms,${VCPKG_INSTALLED_DIR}/Qt6/plugins/platforms>"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/platforms" || (exit 0)
         )
 
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "--- Copying vcpkg runtime DLLs ---"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${VCPKG_INSTALLED_DIR}/bin"
+                "$<IF:$<CONFIG:Debug>,${VCPKG_INSTALLED_DIR}/debug/bin,${VCPKG_INSTALLED_DIR}/bin>"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>" || (exit 0)
         )
     endif()
