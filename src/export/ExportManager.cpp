@@ -72,8 +72,8 @@ bool ExportManager::savePointCloud(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
     }
 
     int rc = -1;
-    const std::string path = toNarrowPath(filename);
     try {
+        const std::string path = toNarrowPath(filename);
         switch (format) {
         case CloudFormat::PLY:
             // binary = true по умолчанию даёт маленькие файлы; можно сделать
@@ -137,8 +137,8 @@ bool ExportManager::savePolygonMesh(const pcl::PolygonMesh &mesh,
     }
 
     int rc = -1;
-    const std::string path = toNarrowPath(filename);
     try {
+        const std::string path = toNarrowPath(filename);
         switch (format) {
         case MeshFormat::PLY:
             rc = pcl::io::savePolygonFilePLY(path, mesh, /*binary_format=*/true);
