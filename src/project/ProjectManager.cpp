@@ -7,10 +7,24 @@
 #include <QJsonObject>
 #include <QDebug>
 #include <pcl/io/ply_io.h>
+#include <filesystem>
 
 namespace {
 constexpr const char *kMetadataFile = "project.json";
 constexpr const char *kScansSubdir  = "scans";
+
+// QString → std::string для передачи в PCL/std::ofstream.
+// На Windows toStdString() даёт UTF-8, но std::ofstream ожидает кодировку
+// текущей локали (ANSI codepage). Конвертируем через std::filesystem::path,
+// который корректно обрабатывает Unicode на всех платформах.
+inline std::string toNarrowPath(const QString &qpath)
+{
+#ifdef _WIN32
+    return std::filesystem::path(qpath.toStdWString()).string();
+#else
+    return qpath.toStdString();
+#endif
+}
 }
 
 ProjectManager::ProjectManager(QObject *parent) : QObject(parent) {}
@@ -322,7 +336,7 @@ bool ProjectManager::saveScanToDisk(ScanItem &item)
     QFileInfo(fullPath).absoluteDir().mkpath(".");
 
     try {
-        const int rc = pcl::io::savePLYFileBinary(fullPath.toStdString(), *item.cloud);
+        const int rc = pcl::io::savePLYFileBinary(toNarrowPath(fullPath), *item.cloud);
         if (rc != 0) {
             m_lastError = QString("pcl::io::savePLYFileBinary вернул %1 для %2").arg(rc).arg(fullPath);
             return false;
@@ -356,7 +370,7 @@ bool ProjectManager::loadScanFromDisk(ScanItem &item)
     }
     auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
     try {
-        const int rc = pcl::io::loadPLYFile(fullPath.toStdString(), *cloud);
+        const int rc = pcl::io::loadPLYFile(toNarrowPath(fullPath), *cloud);
         if (rc != 0) {
             m_lastError = QString("pcl::io::loadPLYFile вернул %1 для %2").arg(rc).arg(fullPath);
             return false;
