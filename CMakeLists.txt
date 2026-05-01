@@ -84,15 +84,15 @@ if(NOT ASTRA_HAVE_OPENNI2)
     message(STATUS "Building AstraScanner in emulation-only mode (no OpenNI2).")
 endif()
 
-# vcpkg installed prefix used for post-build DLL copies (Qt platforms, runtime DLLs).
-if(NOT DEFINED VCPKG_INSTALLED_DIR)
-    if(DEFINED ENV{VCPKG_ROOT})
-        set(VCPKG_INSTALLED_DIR "$ENV{VCPKG_ROOT}/installed/x64-windows"
-            CACHE PATH "vcpkg installed prefix")
-    elseif(WIN32)
-        set(VCPKG_INSTALLED_DIR "C:/dev/vcpkg/installed/x64-windows"
-            CACHE PATH "vcpkg installed prefix")
-    endif()
+# vcpkg triplet directory used for post-build DLL copies (Qt platforms, runtime DLLs).
+# When the vcpkg toolchain is loaded, VCPKG_INSTALLED_DIR points to <root>/installed
+# (without the triplet suffix). We build _VCPKG_TRIPLET_DIR that includes it.
+if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    set(_VCPKG_TRIPLET_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+elseif(DEFINED ENV{VCPKG_ROOT})
+    set(_VCPKG_TRIPLET_DIR "$ENV{VCPKG_ROOT}/installed/x64-windows")
+elseif(WIN32)
+    set(_VCPKG_TRIPLET_DIR "C:/dev/vcpkg/installed/x64-windows")
 endif()
 
 include_directories(
@@ -163,18 +163,18 @@ if(WIN32)
         )
     endif()
 
-    if(DEFINED VCPKG_INSTALLED_DIR)
+    if(DEFINED _VCPKG_TRIPLET_DIR)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "--- Copying Qt platforms ---"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "$<IF:$<CONFIG:Debug>,${VCPKG_INSTALLED_DIR}/debug/Qt6/plugins/platforms,${VCPKG_INSTALLED_DIR}/Qt6/plugins/platforms>"
+                "$<IF:$<CONFIG:Debug>,${_VCPKG_TRIPLET_DIR}/debug/Qt6/plugins/platforms,${_VCPKG_TRIPLET_DIR}/Qt6/plugins/platforms>"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/platforms" || (exit 0)
         )
 
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "--- Copying vcpkg runtime DLLs ---"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "$<IF:$<CONFIG:Debug>,${VCPKG_INSTALLED_DIR}/debug/bin,${VCPKG_INSTALLED_DIR}/bin>"
+                "$<IF:$<CONFIG:Debug>,${_VCPKG_TRIPLET_DIR}/debug/bin,${_VCPKG_TRIPLET_DIR}/bin>"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>" || (exit 0)
         )
     endif()
