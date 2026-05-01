@@ -185,7 +185,7 @@ bool AstraCamera::startStreams()
         return false;
     }
 
-    if (m_device.isImageRegistrationModeSupported(openni::IMAGE_REGISTRATION_DEPTH_TO_COLOR)) {
+    if (m_colorEnabled && m_device.isImageRegistrationModeSupported(openni::IMAGE_REGISTRATION_DEPTH_TO_COLOR)) {
         m_device.setImageRegistrationMode(openni::IMAGE_REGISTRATION_DEPTH_TO_COLOR);
     }
 
@@ -221,6 +221,10 @@ bool AstraCamera::readFrame(cv::Mat &colorMat, cv::Mat &depthMat)
         if (!m_colorCapture.read(tempColor) || tempColor.empty()) return false;
         colorMat = tempColor.clone();
     } else {
+        if (m_colorEnabled && !m_colorCapture.isOpened() && !m_colorDisconnectWarned) {
+            qWarning() << "Color camera disconnected mid-capture, falling back to gray frames";
+            m_colorDisconnectWarned = true;
+        }
         // Без RGB: создаём серый кадр размером depth-потока (640x480).
         colorMat = cv::Mat(480, 640, CV_8UC3, cv::Scalar(200, 200, 200));
     }
