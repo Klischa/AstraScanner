@@ -8,6 +8,19 @@
 #include <pcl/io/obj_io.h>
 #include <filesystem>
 
+namespace {
+// QString → std::string для передачи в PCL/std::ofstream.
+// На Windows toStdString() даёт UTF-8, но std::ofstream ожидает ANSI codepage.
+inline std::string toNarrowPath(const QString &qpath)
+{
+#ifdef _WIN32
+    return std::filesystem::path(qpath.toStdWString()).string();
+#else
+    return qpath.toStdString();
+#endif
+}
+}
+
 ExportManager::ExportManager(QObject *parent) : QObject(parent) {}
 
 ExportManager::CloudFormat ExportManager::detectCloudFormat(const QString &filename)
@@ -52,14 +65,14 @@ bool ExportManager::savePointCloud(const pcl::PointCloud<pcl::PointXYZRGB>::Cons
     }
 
     // Создаём родительскую папку, если её нет.
-    const std::filesystem::path fsPath = filename.toStdString();
+    const std::filesystem::path fsPath(filename.toStdWString());
     if (fsPath.has_parent_path()) {
         std::error_code ec;
         std::filesystem::create_directories(fsPath.parent_path(), ec);
     }
 
     int rc = -1;
-    const std::string path = filename.toStdString();
+    const std::string path = toNarrowPath(filename);
     try {
         switch (format) {
         case CloudFormat::PLY:
@@ -117,14 +130,14 @@ bool ExportManager::savePolygonMesh(const pcl::PolygonMesh &mesh,
         }
     }
 
-    const std::filesystem::path fsPath = filename.toStdString();
-    if (fsPath.has_parent_path()) {
+    const std::filesystem::path fsPath2(filename.toStdWString());
+    if (fsPath2.has_parent_path()) {
         std::error_code ec;
-        std::filesystem::create_directories(fsPath.parent_path(), ec);
+        std::filesystem::create_directories(fsPath2.parent_path(), ec);
     }
 
     int rc = -1;
-    const std::string path = filename.toStdString();
+    const std::string path = toNarrowPath(filename);
     try {
         switch (format) {
         case MeshFormat::PLY:
