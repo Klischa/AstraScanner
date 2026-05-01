@@ -403,8 +403,8 @@ void MainWindow::setupUI()
     QHBoxLayout* rorLayout = new QHBoxLayout();
     QLabel* rorLabel = new QLabel("ROR (радиус):", this);
     QDoubleSpinBox* rorRadiusSpin = new QDoubleSpinBox(this);
-    rorRadiusSpin->setRange(0.001, 0.5);
     rorRadiusSpin->setDecimals(4);
+    rorRadiusSpin->setRange(0.001, 0.5);
     rorRadiusSpin->setSingleStep(0.001);
     rorRadiusSpin->setValue(SettingsManager::instance().rorRadius());
     QLabel* rorNeighborsLabel = new QLabel("мин. соседей:", this);
@@ -423,8 +423,8 @@ void MainWindow::setupUI()
     QHBoxLayout* voxelLayout = new QHBoxLayout();
     QLabel* voxelLabel = new QLabel("Воксель (размер):", this);
     QDoubleSpinBox* voxelSizeSpin = new QDoubleSpinBox(this);
-    voxelSizeSpin->setRange(0.0001, 0.05);
     voxelSizeSpin->setDecimals(4);
+    voxelSizeSpin->setRange(0.0001, 0.05);
     voxelSizeSpin->setSingleStep(0.001);
     voxelSizeSpin->setValue(SettingsManager::instance().voxelLeafSize());
     QPushButton* voxelBtn = m_voxelBtn = new QPushButton("Применить воксель", this);
@@ -490,8 +490,8 @@ void MainWindow::setupUI()
     QHBoxLayout *icpParamsRow = new QHBoxLayout();
     QLabel *icpMaxCorrLabel = new QLabel("Max correspondence (м):", this);
     QDoubleSpinBox *icpMaxCorrSpin = new QDoubleSpinBox(this);
-    icpMaxCorrSpin->setRange(0.001, 1.0);
     icpMaxCorrSpin->setDecimals(3);
+    icpMaxCorrSpin->setRange(0.001, 1.0);
     icpMaxCorrSpin->setSingleStep(0.005);
     icpMaxCorrSpin->setValue(settingsIcp.icpMaxCorrespondenceDistance());
     icpMaxCorrSpin->setToolTip("Максимальное расстояние, на котором ICP ищет пары точек. "
@@ -504,8 +504,8 @@ void MainWindow::setupUI()
 
     QLabel *icpVoxelLabel = new QLabel("Финальный воксель (м):", this);
     QDoubleSpinBox *icpVoxelSpin = new QDoubleSpinBox(this);
-    icpVoxelSpin->setRange(0.0, 0.05);
     icpVoxelSpin->setDecimals(4);
+    icpVoxelSpin->setRange(0.0, 0.05);
     icpVoxelSpin->setSingleStep(0.0005);
     icpVoxelSpin->setValue(settingsIcp.icpVoxelLeafOut());
     icpVoxelSpin->setToolTip("0 → без децимации. Полезно после мержа — N сканов "
@@ -596,8 +596,8 @@ void MainWindow::setupUI()
     QHBoxLayout *normalRow = new QHBoxLayout();
     QLabel *normalRadiusLabel = new QLabel("Normal radius (м):", this);
     QDoubleSpinBox *normalRadiusSpin = new QDoubleSpinBox(this);
-    normalRadiusSpin->setRange(0.0, 0.1);
     normalRadiusSpin->setDecimals(4);
+    normalRadiusSpin->setRange(0.0, 0.1);
     normalRadiusSpin->setSingleStep(0.001);
     normalRadiusSpin->setValue(settings.poissonNormalRadius());
     normalRadiusSpin->setToolTip("Радиус поиска соседей для оценки нормалей. "
@@ -650,24 +650,24 @@ void MainWindow::setupUI()
 
     auto *vpXLabel = new QLabel("X:", this);
     m_poissonVpX = new QDoubleSpinBox(this);
-    m_poissonVpX->setRange(-10.0, 10.0);
     m_poissonVpX->setDecimals(3);
+    m_poissonVpX->setRange(-10.0, 10.0);
     m_poissonVpX->setSingleStep(0.05);
     m_poissonVpX->setSuffix(" м");
     m_poissonVpX->setEnabled(false);
 
     auto *vpYLabel = new QLabel("Y:", this);
     m_poissonVpY = new QDoubleSpinBox(this);
-    m_poissonVpY->setRange(-10.0, 10.0);
     m_poissonVpY->setDecimals(3);
+    m_poissonVpY->setRange(-10.0, 10.0);
     m_poissonVpY->setSingleStep(0.05);
     m_poissonVpY->setSuffix(" м");
     m_poissonVpY->setEnabled(false);
 
     auto *vpZLabel = new QLabel("Z:", this);
     m_poissonVpZ = new QDoubleSpinBox(this);
-    m_poissonVpZ->setRange(-10.0, 10.0);
     m_poissonVpZ->setDecimals(3);
+    m_poissonVpZ->setRange(-10.0, 10.0);
     m_poissonVpZ->setSingleStep(0.05);
     m_poissonVpZ->setSuffix(" м");
     m_poissonVpZ->setValue(-1.0);   // эквивалент дефолтной эвристики
