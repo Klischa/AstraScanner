@@ -45,6 +45,9 @@ private:
     QSpinBox       *m_scanTimeout = nullptr;
     QDoubleSpinBox *m_voxelLeaf = nullptr;
     QSpinBox       *m_frameSkip = nullptr;
+    QDoubleSpinBox *m_depthMin = nullptr;
+    QDoubleSpinBox *m_depthMax = nullptr;
+    QCheckBox      *m_colorCamera = nullptr;
 
     // Фильтры
     QSpinBox       *m_sorMeanK = nullptr;

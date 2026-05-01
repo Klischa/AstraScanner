@@ -23,6 +23,9 @@ namespace {
 constexpr int    kDefaultScanTimeout       = 300;
 constexpr double kDefaultVoxelLeaf         = 0.002;
 constexpr int    kDefaultFrameSkip         = 3;
+constexpr double kDefaultDepthMin          = 0.1;
+constexpr double kDefaultDepthMax          = 10.0;
+constexpr bool   kDefaultColorCamera       = true;
 constexpr int    kDefaultSorMeanK          = 50;
 constexpr double kDefaultSorStddev         = 1.0;
 constexpr double kDefaultRorRadius         = 0.02;
@@ -77,6 +80,26 @@ void SettingsDialog::buildUi()
     m_frameSkip->setRange(1, 30);
     m_frameSkip->setToolTip("Каждый N-й кадр добавляется в облако. Больше = меньше точек, но быстрее.");
     scanForm->addRow("Frame skip:", m_frameSkip);
+
+    m_depthMin = new QDoubleSpinBox(this);
+    m_depthMin->setDecimals(2);
+    m_depthMin->setRange(0.01, 15.0);
+    m_depthMin->setSingleStep(0.05);
+    m_depthMin->setSuffix(" м");
+    m_depthMin->setToolTip("Минимальная дистанция захвата точек (ближе — отбрасывается).");
+    scanForm->addRow("Мин. дистанция:", m_depthMin);
+
+    m_depthMax = new QDoubleSpinBox(this);
+    m_depthMax->setDecimals(2);
+    m_depthMax->setRange(0.1, 30.0);
+    m_depthMax->setSingleStep(0.5);
+    m_depthMax->setSuffix(" м");
+    m_depthMax->setToolTip("Максимальная дистанция захвата точек (дальше — отбрасывается).");
+    scanForm->addRow("Макс. дистанция:", m_depthMax);
+
+    m_colorCamera = new QCheckBox("Включить цветную камеру (RGB)", this);
+    m_colorCamera->setToolTip("Если выключено, захват идёт только по depth-сенсору; точки будут белыми.");
+    scanForm->addRow("", m_colorCamera);
 
     tabs->addTab(scanPage, "Сканирование");
 
@@ -218,6 +241,9 @@ void SettingsDialog::loadFromSettings()
     m_scanTimeout->setValue(s.scanTimeoutSec());
     m_voxelLeaf->setValue(s.voxelLeafSize());
     m_frameSkip->setValue(s.frameSkip());
+    m_depthMin->setValue(s.depthMin());
+    m_depthMax->setValue(s.depthMax());
+    m_colorCamera->setChecked(s.colorCameraEnabled());
 
     m_sorMeanK->setValue(s.sorMeanK());
     m_sorStddev->setValue(s.sorStddevMul());
@@ -246,6 +272,9 @@ void SettingsDialog::saveToSettings()
     s.setScanTimeoutSec(m_scanTimeout->value());
     s.setVoxelLeafSize(m_voxelLeaf->value());
     s.setFrameSkip(m_frameSkip->value());
+    s.setDepthMin(m_depthMin->value());
+    s.setDepthMax(m_depthMax->value());
+    s.setColorCameraEnabled(m_colorCamera->isChecked());
 
     s.setSorMeanK(m_sorMeanK->value());
     s.setSorStddevMul(m_sorStddev->value());
@@ -285,6 +314,9 @@ void SettingsDialog::onResetDefaults()
     m_scanTimeout->setValue(kDefaultScanTimeout);
     m_voxelLeaf->setValue(kDefaultVoxelLeaf);
     m_frameSkip->setValue(kDefaultFrameSkip);
+    m_depthMin->setValue(kDefaultDepthMin);
+    m_depthMax->setValue(kDefaultDepthMax);
+    m_colorCamera->setChecked(kDefaultColorCamera);
 
     m_sorMeanK->setValue(kDefaultSorMeanK);
     m_sorStddev->setValue(kDefaultSorStddev);

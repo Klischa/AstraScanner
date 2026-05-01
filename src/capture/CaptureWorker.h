@@ -19,6 +19,8 @@ public:
     ~CaptureWorker();
 
     void setCloudProcessingEnabled(bool enabled) { m_cloudProcessingEnabled = enabled; }
+    void setDepthRange(float minMeters, float maxMeters) { m_depthMin = minMeters; m_depthMax = maxMeters; }
+    void setColorCameraEnabled(bool enabled) { m_colorCameraEnabled = enabled; }
 
 public slots:
     void process();
@@ -37,6 +39,9 @@ signals:
 private:
     std::atomic<bool> m_running{true};
     std::atomic<bool> m_cloudProcessingEnabled{true};
+    std::atomic<bool> m_colorCameraEnabled{true};
+    float m_depthMin = 0.1f;   // метры
+    float m_depthMax = 10.0f;  // метры
     // Интринсики, *уже* приведённые к разрешению depth-кадра, с которым
     // работает convertToPointCloud. scaleIntrinsicsToDepth() делает пересчёт.
     float m_fx = 570.0f, m_fy = 570.0f, m_cx = 320.0f, m_cy = 240.0f;

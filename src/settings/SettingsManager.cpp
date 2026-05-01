@@ -7,6 +7,9 @@ namespace {
 constexpr const char *kScanTimeout       = "scan/timeoutSec";
 constexpr const char *kVoxelLeaf         = "scan/voxelLeafSize";
 constexpr const char *kFrameSkip         = "scan/frameSkip";
+constexpr const char *kDepthMin          = "scan/depthMin";
+constexpr const char *kDepthMax          = "scan/depthMax";
+constexpr const char *kColorCamera       = "scan/colorCameraEnabled";
 constexpr const char *kSorMeanK          = "filters/sorMeanK";
 constexpr const char *kSorStddev         = "filters/sorStddevMul";
 constexpr const char *kRorRadius         = "filters/rorRadius";
@@ -78,6 +81,36 @@ int SettingsManager::frameSkip() const
 void SettingsManager::setFrameSkip(int n)
 {
     setValue(kFrameSkip, n);
+}
+
+double SettingsManager::depthMin() const
+{
+    return m_settings.value(kDepthMin, 0.1).toDouble();
+}
+
+void SettingsManager::setDepthMin(double meters)
+{
+    setValue(kDepthMin, meters);
+}
+
+double SettingsManager::depthMax() const
+{
+    return m_settings.value(kDepthMax, 10.0).toDouble();
+}
+
+void SettingsManager::setDepthMax(double meters)
+{
+    setValue(kDepthMax, meters);
+}
+
+bool SettingsManager::colorCameraEnabled() const
+{
+    return m_settings.value(kColorCamera, true).toBool();
+}
+
+void SettingsManager::setColorCameraEnabled(bool enabled)
+{
+    setValue(kColorCamera, enabled);
 }
 
 int SettingsManager::sorMeanK() const

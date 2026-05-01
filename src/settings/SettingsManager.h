@@ -29,6 +29,15 @@ public:
     int frameSkip() const;                  // каждый N-й кадр добавляется в облако
     void setFrameSkip(int n);
 
+    double depthMin() const;                // метры — минимальная дистанция сбора точек
+    void setDepthMin(double meters);
+
+    double depthMax() const;                // метры — максимальная дистанция сбора точек
+    void setDepthMax(double meters);
+
+    bool colorCameraEnabled() const;        // вкл/выкл RGB-камеру
+    void setColorCameraEnabled(bool enabled);
+
     // --- Фильтры (дефолты) ---
     int sorMeanK() const;
     void setSorMeanK(int k);

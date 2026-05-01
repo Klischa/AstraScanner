@@ -18,6 +18,7 @@ void CaptureWorker::process()
     m_firstPointLogged = false;
 
     AstraCamera camera;
+    camera.setColorCameraEnabled(m_colorCameraEnabled.load());
     // initialize() всегда возвращает true — если железо недоступно, камера
     // переходит в эмуляцию и сообщает об этом через isEmulationActive().
     camera.initialize();
@@ -75,7 +76,9 @@ void CaptureWorker::process()
         emit finished();
         return;
     }
-    qInfo() << "[Worker] Streams started, cloud processing:" << m_cloudProcessingEnabled;
+    qInfo() << "[Worker] Streams started, cloud processing:" << m_cloudProcessingEnabled
+            << "depth range:" << m_depthMin << "-" << m_depthMax << "m"
+            << "color camera:" << m_colorCameraEnabled.load();
 
     cv::Mat color, depth;
     int frameCounter = 0;
@@ -177,6 +180,8 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr CaptureWorker::convertToPointCloud(
             if (d == 0) continue;
 
             float z = d * 0.001f;
+            if (z < m_depthMin || z > m_depthMax) continue;
+
             float x = (u - cx) * z / fx;
             float y = (v - cy) * z / fy;
 
@@ -184,8 +189,12 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr CaptureWorker::convertToPointCloud(
 
             pcl::PointXYZRGB pt;
             pt.x = x; pt.y = y; pt.z = z;
-            const cv::Vec3b& bgr = colorPtr[v * width + u];
-            pt.r = bgr[2]; pt.g = bgr[1]; pt.b = bgr[0];
+            if (m_colorCameraEnabled) {
+                const cv::Vec3b& bgr = colorPtr[v * width + u];
+                pt.r = bgr[2]; pt.g = bgr[1]; pt.b = bgr[0];
+            } else {
+                pt.r = pt.g = pt.b = 200;
+            }
             cloud->push_back(pt);
             validPoints++;
         }

@@ -109,13 +109,17 @@ bool AstraCamera::initialize()
         qWarning() << "Failed to get camera intrinsics";
     }
 
-    if (!openColorCamera()) {
-        m_lastError = "Unable to open UVC RGB camera";
-        qCritical() << m_lastError.c_str();
-        m_device.close();
-        openni::OpenNI::shutdown();
-        enableEmulation(m_lastError);
-        return true;
+    if (m_colorEnabled) {
+        if (!openColorCamera()) {
+            m_lastError = "Unable to open UVC RGB camera";
+            qCritical() << m_lastError.c_str();
+            m_device.close();
+            openni::OpenNI::shutdown();
+            enableEmulation(m_lastError);
+            return true;
+        }
+    } else {
+        qInfo() << "Color camera disabled by user setting";
     }
 
     if (!m_device.hasSensor(openni::SENSOR_DEPTH)) {
@@ -212,9 +216,14 @@ bool AstraCamera::readFrame(cv::Mat &colorMat, cv::Mat &depthMat)
     generateTestFrames(colorMat, depthMat);
     return true;
 #else
-    cv::Mat tempColor;
-    if (!m_colorCapture.read(tempColor) || tempColor.empty()) return false;
-    colorMat = tempColor.clone();
+    if (m_colorEnabled && m_colorCapture.isOpened()) {
+        cv::Mat tempColor;
+        if (!m_colorCapture.read(tempColor) || tempColor.empty()) return false;
+        colorMat = tempColor.clone();
+    } else {
+        // Без RGB: создаём серый кадр размером depth-потока (640x480).
+        colorMat = cv::Mat(480, 640, CV_8UC3, cv::Scalar(200, 200, 200));
+    }
 
     if (!m_depthStream.isValid()) return false;
     openni::Status rc = m_depthStream.readFrame(&m_depthFrame);
