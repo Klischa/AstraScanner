@@ -66,8 +66,8 @@ void SettingsDialog::buildUi()
     scanForm->addRow("Таймаут сканирования:", m_scanTimeout);
 
     m_voxelLeaf = new QDoubleSpinBox(this);
-    m_voxelLeaf->setRange(0.0001, 0.05);
     m_voxelLeaf->setDecimals(4);
+    m_voxelLeaf->setRange(0.0001, 0.05);
     m_voxelLeaf->setSingleStep(0.0005);
     m_voxelLeaf->setSuffix(" м");
     m_voxelLeaf->setToolTip("Размер ячейки voxel-grid (используется в Magic Wand и «большой» децимации).");
@@ -98,8 +98,8 @@ void SettingsDialog::buildUi()
     auto *rorGroup = new QGroupBox("ROR (Radius Outlier Removal)", filtersPage);
     auto *rorForm = new QFormLayout(rorGroup);
     m_rorRadius = new QDoubleSpinBox(this);
-    m_rorRadius->setRange(0.001, 0.5);
     m_rorRadius->setDecimals(4);
+    m_rorRadius->setRange(0.001, 0.5);
     m_rorRadius->setSingleStep(0.001);
     m_rorRadius->setSuffix(" м");
     rorForm->addRow("Radius:", m_rorRadius);
@@ -115,8 +115,8 @@ void SettingsDialog::buildUi()
     auto *icpPage = new QWidget(this);
     auto *icpForm = new QFormLayout(icpPage);
     m_icpMaxCorr = new QDoubleSpinBox(this);
-    m_icpMaxCorr->setRange(0.001, 1.0);
     m_icpMaxCorr->setDecimals(4);
+    m_icpMaxCorr->setRange(0.001, 1.0);
     m_icpMaxCorr->setSingleStep(0.005);
     m_icpMaxCorr->setSuffix(" м");
     m_icpMaxCorr->setToolTip("maxCorrespondenceDistance — порог для сопоставления точек.");
@@ -130,8 +130,8 @@ void SettingsDialog::buildUi()
     icpForm->addRow("", m_icpSkipNonConv);
 
     m_icpVoxelOut = new QDoubleSpinBox(this);
-    m_icpVoxelOut->setRange(0.0, 0.05);
     m_icpVoxelOut->setDecimals(4);
+    m_icpVoxelOut->setRange(0.0, 0.05);
     m_icpVoxelOut->setSingleStep(0.001);
     m_icpVoxelOut->setSuffix(" м");
     m_icpVoxelOut->setToolTip("Размер ячейки voxel-grid для финальной децимации. 0 = без децимации.");
@@ -159,8 +159,8 @@ void SettingsDialog::buildUi()
     poissonForm->addRow("Samples/node:", m_poissonSamples);
 
     m_poissonNormalRadius = new QDoubleSpinBox(this);
-    m_poissonNormalRadius->setRange(0.0, 0.1);
     m_poissonNormalRadius->setDecimals(4);
+    m_poissonNormalRadius->setRange(0.0, 0.1);
     m_poissonNormalRadius->setSingleStep(0.001);
     m_poissonNormalRadius->setSuffix(" м");
     m_poissonNormalRadius->setToolTip("0 → использовать k-nearest (см. поле k).");
