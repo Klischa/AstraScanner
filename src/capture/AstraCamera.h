@@ -48,6 +48,7 @@ private:
     bool m_initialized = false;
     bool m_emulation = false;
     bool m_colorEnabled = true;
+    bool m_colorDisconnectWarned = false;
     std::string m_lastError;
 
     float m_fx = 570.0f, m_fy = 570.0f, m_cx = 320.0f, m_cy = 240.0f;

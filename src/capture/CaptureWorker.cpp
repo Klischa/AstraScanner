@@ -77,7 +77,7 @@ void CaptureWorker::process()
         return;
     }
     qInfo() << "[Worker] Streams started, cloud processing:" << m_cloudProcessingEnabled
-            << "depth range:" << m_depthMin << "-" << m_depthMax << "m"
+            << "depth range:" << m_depthMin.load(std::memory_order_relaxed) << "-" << m_depthMax.load(std::memory_order_relaxed) << "m"
             << "color camera:" << m_colorCameraEnabled.load();
 
     cv::Mat color, depth;
@@ -170,6 +170,8 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr CaptureWorker::convertToPointCloud(
     int width = depth.cols, height = depth.rows;
     int stride = 3;
 
+    const float depthMin = m_depthMin.load(std::memory_order_relaxed);
+    const float depthMax = m_depthMax.load(std::memory_order_relaxed);
     const uint16_t* depthPtr = depth.ptr<uint16_t>();
     const cv::Vec3b* colorPtr = colorResized.ptr<cv::Vec3b>();
 
@@ -180,7 +182,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr CaptureWorker::convertToPointCloud(
             if (d == 0) continue;
 
             float z = d * 0.001f;
-            if (z < m_depthMin || z > m_depthMax) continue;
+            if (z < depthMin || z > depthMax) continue;
 
             float x = (u - cx) * z / fx;
             float y = (v - cy) * z / fy;
