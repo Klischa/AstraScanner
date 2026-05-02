@@ -1054,40 +1054,47 @@ void MainWindow::setupUI()
 
     // === Full AI Pipeline ===
     connect(fullPipelineBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
-        if (m_scans.empty()) {
+        if (!m_project || m_project->scanCount() == 0) {
             QMessageBox::information(this, "Full Pipeline", "Нет сканов для обработки.");
+            return;
+        }
+        if (m_project->scanCount() < 2) {
+            QMessageBox::information(this, "Full Pipeline", "Нужен хотя бы 1 скан.");
             return;
         }
         aiSegmentStatusLabel->setText("Full Pipeline...");
         statusBar()->showMessage("Full AI Pipeline: обработка...");
         // Обрабатываем все сканы через цепочку
-        auto *watcher = new QFutureWatcher<QVector<int>>(this);
-        connect(watcher, &QFutureWatcher<QVector<int>>::finished,
+        auto *watcher = new QFutureWatcher<int>(this);
+        connect(watcher, &QFutureWatcher<int>::finished,
                 this, [this, watcher, aiSegmentStatusLabel]() {
-            auto results = watcher->result();
-            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(results.size()));
+            int processed = watcher->result();
+            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(processed));
             refreshScansList();
             watcher->deleteLater();
         });
-        QFuture<QVector<int>> future = QtConcurrent::run([this]() {
-            QVector<int> resultIds;
-            for (int i = 0; i < m_scans.size(); ++i) {
-                auto cloud = m_scans[i];
+        QFuture<int> future = QtConcurrent::run([this]() {
+            int count = 0;
+            for (int i = 0; i < m_project->scanCount(); ++i) {
+                auto cloud = m_project->scanCloud(i);
+                if (!cloud || cloud->empty()) continue;
                 // Сегментация NPMFF
                 PointCloudFilters::NPMFFParams npmffParams;
                 auto segResult = m_filters->segmentNPMFF(cloud, npmffParams);
                 if (segResult.success && !segResult.foregroundIndices.isEmpty()) {
                     cloud = m_filters->filterByIndices(cloud, segResult.foregroundIndices, true);
-                    m_scans[i] = cloud;
                 }
+                if (!cloud || cloud->empty()) continue;
                 // Enhance SuperPC
                 auto enhanced = m_filters->enhanceSuperPC(cloud);
-                if (enhanced) {
-                    m_scans[i] = enhanced;
+                if (enhanced && !enhanced->empty()) {
+                    m_project->setScanCloud(i, enhanced);
+                } else if (cloud->empty() == false) {
+                    m_project->setScanCloud(i, cloud);
                 }
-                resultIds.append(i);
+                count++;
             }
-            return resultIds;
+            return count;
         });
         watcher->setFuture(future);
     });
@@ -2080,7 +2087,7 @@ void MainWindow::onReconstructLightweightClicked()
     });
 
     QFuture<PointCloudFilters::MeshResult> future = QtConcurrent::run([this, snapshot, params]() {
-        return m_filters->reconstructMesh(snapshot, params);
+        return m_filters->generateLightweightMesh(snapshot, params);
     });
     watcher->setFuture(future);
 }
