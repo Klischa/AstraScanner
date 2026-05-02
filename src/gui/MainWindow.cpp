@@ -2186,11 +2186,20 @@ void MainWindow::onTurntableTick()
     }
 
     if (mode == "accumulate") {
-        // Режим накопления: объединяем с предыдущими сканами
+        // Режим накопления: объединяем с предыдущими сканами через ICP
         if (m_project->scanCount() > 0) {
-            auto lastCloud = m_project->scanCloud(m_project->scanCount() - 1);
+            auto lastCloud = m_project->scanCloud(0); // скан 0 - накопленное облако
             if (lastCloud && !lastCloud->empty()) {
-                *snapshot += *lastCloud;
+                // Выравниваем через ICP перед объединением
+                double maxCorr = 0.05; // 5cm
+                int maxIter = 50;
+                auto aligned = m_filters->registerPointCloudsICP(snapshot, lastCloud, maxCorr, maxIter);
+                if (aligned && !aligned->empty()) {
+                    *aligned += *lastCloud;
+                    snapshot = aligned;
+                } else {
+                    *snapshot += *lastCloud;
+                }
             }
         }
         // Сохраняем как скан 0 (перезаписываем)
