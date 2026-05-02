@@ -1040,8 +1040,8 @@ void MainWindow::setupUI()
         // Получаем первый и второй скан
         auto source = m_project->scanCloud(0);
         auto target = m_project->scanCloud(1);
-        if (!source || !target) {
-            aiRegStatusLabel->setText("Ошибка загрузки сканов");
+        if (!source || !target || source->empty() || target->empty()) {
+            aiRegStatusLabel->setText("Ошибка: пустые сканы");
             return;
         }
         

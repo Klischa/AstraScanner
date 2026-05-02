@@ -111,6 +111,7 @@ set(SOURCES
     src/gui/MainWindow.cpp
     src/gui/SettingsDialog.cpp
     src/gui/LassoSelector.cpp
+    src/ai/AiClient.cpp
     src/capture/AstraCamera.cpp
     src/capture/CaptureWorker.cpp
     src/calibration/CameraCalibrator.cpp
