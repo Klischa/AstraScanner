@@ -1062,71 +1062,24 @@ void MainWindow::setupUI()
     // === Full AI Pipeline ===
     connect(fullPipelineBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
         if (!m_project || m_project->scanCount() == 0) {
-            QMessageBox::information(this, "Full Pipeline", "Нет сканов для обработки.");
+            QMessageBox::information(this, "Full Pipeline", "Нет сканов.");
             return;
         }
-        aiSegmentStatusLabel->setText("Full Pipeline...");
-        statusBar()->showMessage("Full AI Pipeline: обработка...");
-        
-        // Собираем облака в главном потре (безопасный доступ)
-        QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> cloudList;
-        for (int i = 0; i < m_project->scanCount(); ++i) {
-            auto cloud = m_project->scanCloud(i);
-            if (cloud && !cloud->empty()) {
-                cloudList.append(cloud);
-            }
-        }
-        if (cloudList.isEmpty()) {
-            QMessageBox::information(this, "Full Pipeline", "Нет валидных сканов.");
-            return;
-        }
-        
-        // Обрабатываем в фоне - только облака, без m_project
-        auto *watcher = new QFutureWatcher<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
-        connect(watcher, &QFutureWatcher<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>>::finished,
-                this, [this, watcher, aiSegmentStatusLabel]() {
-            auto results = watcher->result();
-            // Обновляем сканы в главном потре
-            for (int i = 0; i < results.size() && i < m_project->scanCount(); ++i) {
-                if (results[i] && !results[i]->empty()) {
-                    m_project->setScanCloud(i, results[i]);
-                }
-            }
-            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(results.size()));
-            refreshScansList();
-            watcher->deleteLater();
-        });
-        QFuture<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>> future = 
-            QtConcurrent::run([this, cloudList]() {
-                QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> out;
-                for (auto cloud : cloudList) {
-                    if (!cloud || cloud->empty()) {
-                        out.append(cloud);
-                        continue;
-                    }
-                    // Сегментация NPMFF
-                    PointCloudFilters::NPMFFParams npmffParams;
-                    auto segResult = m_filters->segmentNPMFF(cloud, npmffParams);
-                    if (segResult.success && !segResult.foregroundIndices.isEmpty()) {
-                        cloud = m_filters->filterByIndices(cloud, segResult.foregroundIndices, true);
-                    }
-                    if (!cloud || cloud->empty()) {
-                        out.append(cloud);
-                        continue;
-                    }
-                    // Enhance SuperPC
-                    auto enhanced = m_filters->enhanceSuperPC(cloud);
-                    if (enhanced && !enhanced->empty()) {
-                        out.append(enhanced);
-                    } else {
-                        out.append(cloud);
-                    }
-                }
-                return out;
-            });
-        watcher->setFuture(future);
-    });
 
+        // Простая последовательная обработка
+        int count = m_project->scanCount();
+        for (int i = 0; i < count; ++i) {
+            auto cloud = m_project->scanCloud(i);
+            if (!cloud || cloud->empty()) continue;
+            auto enhanced = m_filters->enhanceSuperPC(cloud);
+            if (enhanced && !enhanced->empty()) {
+                m_project->setScanCloud(i, enhanced);
+            }
+        }
+
+        aiSegmentStatusLabel->setText(QString("Done: %1").arg(count));
+        refreshScansList();
+    });
     connect(mergeScansBtn, &QPushButton::clicked, this,
         [this, icpMaxCorrSpin, icpIterSpin, icpVoxelSpin, icpSkipCheck]() {
             PointCloudFilters::MergeParams p;
@@ -1631,6 +1584,7 @@ void MainWindow::onNewProject()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
+    });
 }
 
 void MainWindow::onOpenProject()
@@ -1651,6 +1605,7 @@ void MainWindow::onOpenProject()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
+    });
 }
 
 void MainWindow::onSaveProject()
@@ -1685,6 +1640,7 @@ void MainWindow::onSaveProjectAs()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
+    });
 }
 
 void MainWindow::onAddCurrentCloudToProject()
@@ -2070,6 +2026,7 @@ void MainWindow::onSaveMergedToProject()
         return;
     }
     refreshScansList();
+    });
     statusBar()->showMessage(
         QString("Сохранено как скан #%1 «%2»").arg(index).arg(name.trimmed()), 5000);
 }
