@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QBuffer>
 #include <QHttpMultiPart>
+#include <QTemporaryFile>
+#include <QFile>
 
 // PCL includes
 #include <pcl/io/pcd_io.h>
@@ -484,7 +486,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr AiClient::decodeCloudFromBase64(const QBy
     pcl::io::loadPLYFile(tempPath.toStdString(), *cloud);
     
     // Удаляем временный файл
-    QFile::remove(tempPath);
+    QFile(tempPath).remove();
     
     return cloud;
 }

@@ -513,7 +513,7 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
         }
         
         if (!clusters.empty() && maxClusterSize > 0) {
-            result.foregroundIndices = QVector<int>::fromStdVector(
+            result.foregroundIndices = QVector<int>(
                 clusters[maxClusterIdx].indices);
             result.success = true;
             qInfo() << "[NPMFF] Region Growing found" << clusters.size()
@@ -605,7 +605,7 @@ PointCloudFilters::RegistrationResult PointCloudFilters::registerBufferX(
         
         // Если включен ICP refinement
         if (result.success && params.useICPRefinement) {
-            auto aligned = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+            auto aligned = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>();
             pcl::transformPointCloud(*source, *aligned, result.transformation);
             
             pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
