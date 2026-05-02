@@ -138,6 +138,7 @@ target_link_libraries(${PROJECT_NAME}
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::Concurrent
+    Qt6::Network
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     ${VTK_LIBRARIES}
