@@ -436,7 +436,31 @@ void MainWindow::setupUI()
 
     QPushButton* magicWandBtn = m_magicWandBtn = new QPushButton("Magic Wand (быстрая очистка)", this);
     filterLayout->addWidget(magicWandBtn);
-
+    
+    // === AI Сегментация (NPMFF-Net) ===
+    QGroupBox *aiSegmentGroup = new QGroupBox("AI Сегментация", this);
+    QVBoxLayout *aiSegmentLayout = new QVBoxLayout(aiSegmentGroup);
+    
+    QLabel *aiSegmentHint = new QLabel(
+        "Автоматическая сегментация облака точек с помощью NPMFF-Net.", this);
+    aiSegmentHint->setWordWrap(true);
+    aiSegmentLayout->addWidget(aiSegmentHint);
+    
+    QHBoxLayout *aiSegmentBtnRow = new QHBoxLayout();
+    QPushButton *segmentAIBtn = new QPushButton("Сегмент AI (NPMFF-Net)", this);
+    segmentAIBtn->setToolTip("Запустить автоматическую сегментацию NPMFF-Net.");
+    QPushButton *filterByIndicesBtn = new QPushButton("Фильтр по индексам", this);
+    filterByIndicesBtn->setToolTip("Фильтровать облако по списку индексов.");
+    aiSegmentBtnRow->addWidget(segmentAIBtn);
+    aiSegmentBtnRow->addWidget(filterByIndicesBtn);
+    aiSegmentBtnRow->addStretch();
+    aiSegmentLayout->addLayout(aiSegmentBtnRow);
+    
+    QLabel *aiSegmentStatusLabel = new QLabel("Готов", this);
+    aiSegmentLayout->addWidget(aiSegmentStatusLabel);
+    
+    filterLayout->addWidget(aiSegmentGroup);
+    
     processingLayout->addWidget(filterGroup);
 
     // --- Ручное редактирование облака (лассо) ---
@@ -863,6 +887,96 @@ void MainWindow::setupUI()
             return m_filters->applyMagicWand(snapshot);
         });
         watcher->setFuture(m_pendingFilterFuture);
+    });
+    
+    // === AI Сегментация NPMFF-Net ===
+    connect(segmentAIBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+                QMessageBox::information(this, "Сегментация",
+                    "Текущее облако пустое.");
+                return;
+            }
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        setFilterButtonsEnabled(false);
+        aiSegmentStatusLabel->setText("Сегментация NPMFF-Net...");
+        
+        auto *watcher = new QFutureWatcher<PointCloudFilters::SegmentationResult>(this);
+        connect(watcher, &QFutureWatcher<PointCloudFilters::SegmentationResult>::finished, 
+                this, [this, watcher, aiSegmentStatusLabel]() {
+            auto result = watcher->result();
+            if (result.success) {
+                // Фильтруем облако, оставляем только foreground
+                QMutexLocker locker(&m_cloudMutex);
+                auto filtered = m_filters->filterByIndices(
+                    m_accumulatedCloud, result.foregroundIndices, true);
+                if (filtered) {
+                    *m_accumulatedCloud = *filtered;
+                    emit cloudSizeChanged(static_cast<int>(filtered->size()));
+                    updateViewer();
+                    aiSegmentStatusLabel->setText(
+                        QString("Сегментация: %1 точек")
+                            .arg(filtered->size()));
+                }
+            } else {
+                aiSegmentStatusLabel->setText("Ошибка: " + result.error);
+                QMessageBox::warning(this, "Сегментация", 
+                    "Ошибка: " + result.error);
+            }
+            setFilterButtonsEnabled(true);
+            watcher->deleteLater();
+        });
+        
+        QFuture<PointCloudFilters::SegmentationResult> future = 
+            QtConcurrent::run([this, snapshot]() {
+                PointCloudFilters::NPMFFParams params;
+                return m_filters->segmentNPMFF(snapshot, params);
+            });
+        watcher->setFuture(future);
+    });
+    
+    connect(filterByIndicesBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
+        bool ok;
+        QString indicesText = QInputDialog::getText(this, "Фильтр по индексам",
+            "Введите индексы через запятую (например: 1,2,3 или 1-10):",
+            QLineEdit::Normal, QString(), &ok);
+        if (!ok || indicesText.isEmpty()) return;
+        
+        // Парсим индексы
+        QVector<int> indices;
+        QStringList parts = indicesText.split(',');
+        for (const QString &part : parts) {
+            if (part.contains('-')) {
+                QStringList range = part.split('-');
+                if (range.size() == 2) {
+                    int start = range[0].trimmed().toInt();
+                    int end = range[1].trimmed().toInt();
+                    for (int i = start; i <= end; ++i) indices.append(i);
+                }
+            } else {
+                indices.append(part.trimmed().toInt());
+            }
+        }
+        
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) return;
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        
+        auto filtered = m_filters->filterByIndices(snapshot, indices, true);
+        if (filtered) {
+            QMutexLocker locker(&m_cloudMutex);
+            *m_accumulatedCloud = *filtered;
+            emit cloudSizeChanged(static_cast<int>(filtered->size()));
+            updateViewer();
+            aiSegmentStatusLabel->setText(
+                QString("Оставлено %1 точек").arg(filtered->size()));
+        }
     });
 
     connect(mergeScansBtn, &QPushButton::clicked, this,

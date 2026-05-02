@@ -12,6 +12,7 @@
 namespace {
 constexpr const char *kMetadataFile = "project.json";
 constexpr const char *kScansSubdir  = "scans";
+constexpr const char *kAiTempSubdir = "ai_temp";  // Промежуточные AI артефакты
 
 // QString → std::string для передачи в PCL/std::ofstream.
 // На Windows toStdString() даёт UTF-8, но std::ofstream ожидает кодировку
@@ -41,6 +42,19 @@ QString ProjectManager::scansDirPath() const
     return QDir(m_projectDir).filePath(kScansSubdir);
 }
 
+QString ProjectManager::aiTempDir() const
+{
+    if (m_projectDir.isEmpty()) return {};
+    return QDir(m_projectDir).filePath(kAiTempSubdir);
+}
+
+bool ProjectManager::createAiTempDir()
+{
+    if (m_projectDir.isEmpty()) return false;
+    QDir dir(m_projectDir);
+    return dir.mkpath(kAiTempSubdir);
+}
+
 void ProjectManager::setDirty(bool dirty)
 {
     if (m_dirty != dirty) {
@@ -59,6 +73,11 @@ bool ProjectManager::newProject(const QString &projectDir, const QString &name)
     }
     if (!QDir(projectDir).mkpath(kScansSubdir)) {
         m_lastError = QString("Не удалось создать поддиректорию scans/");
+        return false;
+    }
+    // Создаём директорию для AI промежуточных результатов
+    if (!QDir(projectDir).mkpath(kAiTempSubdir)) {
+        m_lastError = QString("Не удалось создать поддиректорию ai_temp/");
         return false;
     }
 
