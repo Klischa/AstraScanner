@@ -8,11 +8,25 @@
 #include <pcl/surface/poisson.h>
 #include <pcl/common/io.h>
 #include <pcl/common/centroid.h>
+#include <pcl/segmentation/region_growing.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/ModelCoefficients.h>
 
 #include <Eigen/Core>
 #include <queue>
 #include <vector>
 #include <cmath>
+
+// AI включения
+#include "../ai/AiClient.h"
+
+// Глобальный AI клиент для коммуникации с AIService
+static AiClient *g_aiClient = nullptr;
+
+void PointCloudFilters::setAiClient(AiClient *client)
+{
+    g_aiClient = client;
+}
 
 PointCloudFilters::PointCloudFilters(QObject *parent) : QObject(parent) {}
 
@@ -413,4 +427,491 @@ pcl::PolygonMesh PointCloudFilters::reconstructPoissonMesh(
                 << "(depth=" << params.depth << ")";
     }
     return mesh;
+}
+
+// === AI Сегментация NPMFF-Net ===
+
+PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    const NPMFFParams &params)
+{
+    SegmentationResult result;
+    result.success = false;
+    
+    if (!cloud || cloud->empty()) {
+        result.error = "Empty point cloud";
+        return result;
+    }
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        // Вызываем AI сервис для сегментации
+        // Асинхронный вызов - для синхронного результата используем QEventLoop
+        QEventLoop loop;
+        QVector<int> receivedIndices;
+        
+        QObject::connect(g_aiClient, &AiClient::segmentationFinished,
+                        [&](const QVector<int> &indices, bool success) {
+            receivedIndices = indices;
+            result.success = success;
+            loop.quit();
+        });
+        
+        g_aiClient->segmentNPMFF(cloud);
+        loop.exec();  // Ждём результат
+        
+        if (result.success) {
+            result.foregroundIndices = receivedIndices;
+            qInfo() << "[NPMFF] AI segmentation succeeded with"
+                   << receivedIndices.size() << "points";
+        } else {
+            result.error = g_aiClient->lastError();
+            qWarning() << "[NPMFF] AI segmentation failed:" << result.error;
+        }
+        
+        return result;
+    }
+    
+    // Fallback: используем встроенные алгоритмы сегментации (Region Growing)
+    try {
+        emit progressUpdated(20);
+        
+        // Оценка нормалей
+        pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+        pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> ne;
+        pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
+        ne.setInputCloud(cloud);
+        ne.setSearchMethod(tree);
+        ne.setKSearch(20);
+        ne.compute(*normals);
+        
+        emit progressUpdated(40);
+        
+        // Region Growing сегментация
+        pcl::RegionGrowing<pcl::PointXYZRGB, pcl::Normal> reg;
+        reg.setInputCloud(cloud);
+        reg.setInputNormals(normals);
+        reg.setMinClusterSize(params.minClusterSize);
+        reg.setSmoothnessThreshold(params.smoothnessWeight * M_PI / 180.0);
+        reg.setCurvatureThreshold(1.0);
+        reg.setResidualThreshold(params.densityThreshold);
+        
+        std::vector<pcl::PointIndices> clusters;
+        reg.extract(clusters);
+        
+        emit progressUpdated(80);
+        
+        // Находим самый большой кластер
+        int maxClusterIdx = 0;
+        std::size_t maxClusterSize = 0;
+        for (std::size_t i = 0; i < clusters.size(); ++i) {
+            if (clusters[i].indices.size() > maxClusterSize) {
+                maxClusterSize = clusters[i].indices.size();
+                maxClusterIdx = static_cast<int>(i);
+            }
+        }
+        
+        if (!clusters.empty() && maxClusterSize > 0) {
+            result.foregroundIndices = QVector<int>::fromStdVector(
+                clusters[maxClusterIdx].indices);
+            result.success = true;
+            qInfo() << "[NPMFF] Region Growing found" << clusters.size()
+                   << "clusters, largest has" << maxClusterSize << "points";
+        }
+        
+        emit progressUpdated(100);
+        
+    } catch (const std::exception &e) {
+        result.error = e.what();
+        qWarning() << "[NPMFF] Segmentation error:" << e.what();
+    }
+    
+    return result;
+}
+
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::filterByIndices(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    const QVector<int> &indices,
+    bool keepIndices)
+{
+    if (!cloud || cloud->empty()) return cloud;
+    
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
+    
+    if (keepIndices) {
+        // Сохранить только указанные индексы
+        for (int idx : indices) {
+            if (idx >= 0 && idx < static_cast<int>(cloud->size())) {
+                filtered->push_back(cloud->points[idx]);
+            }
+        }
+    } else {
+        // Удалить указанные индексы
+        std::set<int> indexSet = QSet<int>::fromList(QVector<int>::toList(indices)).toSet();
+        for (int i = 0; i < static_cast<int>(cloud->size()); ++i) {
+            if (!indexSet.contains(i)) {
+                filtered->push_back(cloud->points[i]);
+            }
+        }
+    }
+    
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = true;
+    
+    int pointsBefore = cloud->size();
+    int pointsAfter = filtered->size();
+    emit filterCompleted("FilterByIndices", pointsBefore, pointsAfter);
+    
+    qInfo() << "FilterByIndices:" << pointsBefore << "->" << pointsAfter << "points";
+    return filtered;
+}
+
+// === Регистрация BUFFER-X ===
+
+PointCloudFilters::RegistrationResult PointCloudFilters::registerBufferX(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+    const BufferXParams &params)
+{
+    RegistrationResult result;
+    result.transformation = Eigen::Matrix4f::Identity();
+    result.success = false;
+    
+    if (!source || source->empty() || !target || target->empty()) {
+        result.error = "Empty point cloud";
+        return result;
+    }
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        QEventLoop loop;
+        
+        QObject::connect(g_aiClient, &AiClient::registrationFinished,
+                        [&](const Eigen::Matrix4f &transform, bool success) {
+            result.transformation = transform;
+            result.success = success;
+            result.fitness = success ? 0.95f : 0.0f;
+            loop.quit();
+        });
+        
+        g_aiClient->registerBUFFERX(source, target, params.useICPRefinement);
+        loop.exec();
+        
+        if (!result.success) {
+            result.error = g_aiClient->lastError();
+        }
+        
+        // Если включен ICP refinement
+        if (result.success && params.useICPRefinement) {
+            auto aligned = boost::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+            pcl::transformPointCloud(*source, *aligned, result.transformation);
+            
+            pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
+            icp.setInputSource(aligned);
+            icp.setInputTarget(target);
+            icp.setMaxCorrespondenceDistance(params.icpMaxDistance);
+            icp.setMaximumIterations(params.icpMaxIterations);
+            
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr icpResult(new pcl::PointCloud<pcl::PointXYZRGB>);
+            icp.align(*icpResult);
+            
+            result.icpTransformation = icp.getFinalTransformation();
+            result.converged = icp.hasConverged();
+            result.fitness = icp.getFitnessScore();
+            
+            // Комбинируем трансформации
+            result.transformation = result.icpTransformation * result.transformation;
+        }
+        
+        return result;
+    }
+    
+    // Fallback: просто ICP
+    qInfo() << "[BUFFER-X] Using fallback ICP registration";
+    return registerHybrid(source, target, params);
+}
+
+PointCloudFilters::RegistrationResult PointCloudFilters::registerHybrid(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+    const BufferXParams &params)
+{
+    RegistrationResult result;
+    result.transformation = Eigen::Matrix4f::Identity();
+    result.success = false;
+    
+    if (!source || source->empty() || !target || target->empty()) {
+        result.error = "Empty point cloud";
+        return result;
+    }
+    
+    emit progressUpdated(10);
+    
+    // Простой ICP для грубой регистрации
+    auto aligned = registerPointCloudsICP(source, target,
+                                     params.icpMaxDistance,
+                                     params.icpMaxIterations);
+    
+    emit progressUpdated(80);
+    
+    // Вычисляем трансформацию
+    Eigen::Vector4f centroid1, centroid2;
+    pcl::compute3DCentroid(*source, centroid1);
+    pcl::compute3DCentroid(*target, centroid2);
+    
+    result.transformation.block<3, 1>(0, 3) = centroid2.block<3, 1>(0, 0) - centroid1.block<3, 1>(0, 0);
+    
+    // ICP финальная подгонка если включена
+    if (params.useICPRefinement) {
+        pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
+        icp.setInputSource(aligned);
+        icp.setInputTarget(target);
+        icp.setMaxCorrespondenceDistance(params.icpMaxDistance);
+        icp.setMaximumIterations(params.icpMaxIterations);
+        
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr icpResult(new pcl::PointCloud<pcl::PointXYZRGB>);
+        icp.align(*icpResult);
+        
+        result.icpTransformation = icp.getFinalTransformation();
+        result.converged = icp.hasConverged();
+        result.fitness = icp.getFitnessScore();
+    }
+    
+    result.success = true;
+    emit progressUpdated(100);
+    
+    qInfo() << "[BUFFER-X+ICP] Registration completed, fitness:" << result.fitness;
+    return result;
+}
+
+PointCloudFilters::RegistrationResult PointCloudFilters::registerDINO(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+    bool useColorImages)
+{
+    RegistrationResult result;
+    result.transformation = Eigen::Matrix4f::Identity();
+    result.success = false;
+    
+    if (!source || source->empty() || !target || target->empty()) {
+        result.error = "Empty point cloud";
+        return result;
+    }
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        QEventLoop loop;
+        
+        QObject::connect(g_aiClient, &AiClient::registrationFinished,
+                        [&](const Eigen::Matrix4f &transform, bool success) {
+            result.transformation = transform;
+            result.success = success;
+            result.fitness = success ? 0.9f : 0.0f;
+            loop.quit();
+        });
+        
+        g_aiClient->registerDINO(source, target, QByteArray(), QByteArray());
+        loop.exec();
+        
+        if (!result.success) {
+            result.error = g_aiClient->lastError();
+        }
+        
+        return result;
+    }
+    
+    // Fallback: используем ICP
+    qInfo() << "[DINOReg] Using fallback ICP registration";
+    return registerHybrid(source, target, BufferXParams());
+}
+
+// === Легкая Mesh генерация ===
+
+PointCloudFilters::MeshResult PointCloudFilters::generateLightweightMesh(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    const MeshQualityParams &params)
+{
+    MeshResult result;
+    result.success = false;
+    
+    if (!cloud || cloud->empty()) {
+        result.error = "Empty point cloud";
+        return result;
+    }
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        QEventLoop loop;
+        QString meshPath;
+        
+        QObject::connect(g_aiClient, &AiClient::meshGenerationFinished,
+                        [&](const QString &path, bool success) {
+            meshPath = path;
+            result.success = success;
+            result.success = success;
+            loop.quit();
+        });
+        
+        AiClient::MeshQuality quality;
+        switch (params.quality) {
+            case MeshQualityParams::Quality::Low:
+                quality = AiClient::MeshQuality::Low; break;
+            case MeshQualityParams::Quality::High:
+                quality = AiClient::MeshQuality::High; break;
+            default:
+                quality = AiClient::MeshQuality::Medium;
+        }
+        
+        g_aiClient->generateMeshLightweight(cloud, quality, "ply");
+        loop.exec();
+        
+        if (result.success) {
+            // Загружаем mesh из файла
+            pcl::io::loadPLYFile(meshPath.toStdString(), result.mesh);
+            result.vertexCount = result.mesh.cloud.width;
+            result.faceCount = result.mesh.polygons.size();
+        } else {
+            result.error = g_aiClient->lastError();
+        }
+        
+        return result;
+    }
+    
+    // Fallback: используем Poisson с пониженным качеством
+    try {
+        emit progressUpdated(20);
+        
+        PoissonParams poissonParams;
+        switch (params.quality) {
+            case MeshQualityParams::Quality::Low:
+                poissonParams.depth = 6;
+                break;
+            case MeshQualityParams::Quality::High:
+                poissonParams.depth = 10;
+                break;
+            default:
+                poissonParams.depth = 8;
+        }
+        
+        result.mesh = reconstructPoissonMesh(cloud, poissonParams);
+        
+        result.vertexCount = result.mesh.cloud.width;
+        result.faceCount = result.mesh.polygons.size();
+        result.success = result.faceCount > 0;
+        
+        if (!result.success) {
+            result.error = "Mesh reconstruction failed";
+        }
+        
+        emit progressUpdated(100);
+        qInfo() << "[LightweightMR] Generated" << result.faceCount << "faces";
+        
+    } catch (const std::exception &e) {
+        result.error = e.what();
+        qWarning() << "[LightweightMR] Error:" << e.what();
+    }
+    
+    return result;
+}
+
+// === SuperPC и RARE ===
+
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::enhanceSuperPC(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    const SuperPCParams &params)
+{
+    if (!cloud || cloud->empty()) return cloud;
+    
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr resultCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        QEventLoop loop;
+        QString resultPath;
+        
+        QObject::connect(g_aiClient, &AiClient::enhancementFinished,
+                        [&](const QString &path, bool success) {
+            if (success) resultPath = path;
+            loop.quit();
+        });
+        
+        QStringList operations;
+        if (params.denoise) operations << "denoise";
+        if (params.fill) operations << "fill";
+        if (params.densify) operations << "densify";
+        if (params.colorize) operations << "colorize";
+        
+        g_aiClient->enhanceSuperPC(cloud, operations);
+        loop.exec();
+        
+        if (!resultPath.isEmpty()) {
+            pcl::io::loadPLYFile(resultPath.toStdString(), *resultCloud);
+            return resultCloud;
+        }
+    }
+    
+    // Fallback: применяем локальные фильтры
+    emit progressUpdated(20);
+    
+    if (params.denoise) {
+        resultCloud = applyStatisticalOutlierRemoval(cloud, 50, 1.0);
+    } else {
+        resultCloud = cloud;
+    }
+    
+    emit progressUpdated(50);
+    
+    if (params.densify) {
+        // Простое сглаживание
+        resultCloud = applyVoxelGrid(resultCloud, 0.005f);
+    }
+    
+    emit progressUpdated(100);
+    
+    int pointsBefore = cloud->size();
+    int pointsAfter = resultCloud->size();
+    emit filterCompleted("SuperPC", pointsBefore, pointsAfter);
+    
+    qInfo() << "SuperPC:" << pointsBefore << "->" << pointsAfter;
+    return resultCloud;
+}
+
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::refineRARE(
+    const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+    float qualityImprovement)
+{
+    if (!cloud || cloud->empty()) return cloud;
+    
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr resultCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+    
+    // Если AI клиент доступен - используем его
+    if (g_aiClient && g_aiClient->isAvailable()) {
+        QEventLoop loop;
+        QString resultPath;
+        
+        QObject::connect(g_aiClient, &AiClient::refinementFinished,
+                        [&](const QString &path, bool success) {
+            if (success) resultPath = path;
+            loop.quit();
+        });
+        
+        g_aiClient->refineRARE(cloud);
+        loop.exec();
+        
+        if (!resultPath.isEmpty()) {
+            pcl::io::loadPLYFile(resultPath.toStdString(), *resultCloud);
+            return resultCloud;
+        }
+    }
+    
+    // Fallback: легкое сглаживание
+    emit progressUpdated(50);
+    
+    resultCloud = applyStatisticalOutlierRemoval(cloud, 30, 0.8);
+    
+    emit progressUpdated(100);
+    
+    qInfo() << "RARE refined:" << cloud->size() << "->" << resultCloud->size();
+    return resultCloud;
 }

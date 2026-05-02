@@ -8,6 +8,9 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
+// Директория для AI временных файлов (промежуточные результаты)
+constexpr const char *kAiTempSubdir = "ai_temp";
+
 // Одна единица скана внутри проекта: облако точек + метаданные.
 struct ScanItem {
     QString name;                                           // пользовательское имя
@@ -62,6 +65,10 @@ public:
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr scanCloud(int index);
 
     QString lastError() const { return m_lastError; }
+
+    // AI временная директория для промежуточных артефактов
+    QString aiTempDir() const { return m_projectDir.isEmpty() ? QString() : QDir(m_projectDir).filePath(kAiTempSubdir); }
+    bool createAiTempDir();
 
 signals:
     void projectChanged();          // метаданные или состояние dirty

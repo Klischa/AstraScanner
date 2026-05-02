@@ -2,6 +2,7 @@
 #define POINTCLOUDFILTERS_H
 
 #include <QObject>
+#include <QPolygonF>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/PolygonMesh.h>
@@ -15,6 +16,126 @@ class PointCloudFilters : public QObject
 {
     Q_OBJECT
 public:
+    // === AI Сегментация ===
+    
+    // NPMFF-Net параметры сегментации (без обучения)
+    struct NPMFFParams {
+        float densityThreshold = 0.5f;    // Порог плотности для сегментации
+        int minClusterSize = 100;          // Минимальный размер кластера
+        float smoothnessWeight = 0.5f;       // Вес сглаживания
+        bool useBoundaryDetection = true;    // Использовать детекцию границ
+    };
+    
+    // Результат сегментации NPMFF-Net
+    struct SegmentationResult {
+        QVector<int> foregroundIndices;  // Индексы точек объекта
+        QVector<int> backgroundIndices;   // Индексы фона
+        QVector<int> boundaryIndices;  // Индексы границ
+        bool success = false;
+        QString error;
+    };
+    
+    // Сегментация NPMFF-Net - возвращает индексы для фильтрации
+    // (аналог лассо, но автоматическая)
+    SegmentationResult segmentNPMFF(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        const NPMFFParams &params = {});
+    
+    // FilterByIndices - фильтрация по индексу (аналог лассо без ручной работы)
+    // mode: true = сохранить индексы, false = удалить индексы
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr filterByIndices(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        const QVector<int> &indices,
+        bool keepIndices = true);
+    
+    // === Регистрация BUFFER-X ===
+    
+    // Параметры BUFFER-X регистрации
+    struct BufferXParams {
+        bool useICPRefinement = true;      // Использовать ICP для финальной подгонки
+        double icpMaxDistance = 0.05;      // Макс. расстояние для ICP
+        int icpMaxIterations = 50;        // Макс. итераций ICP
+        float fitnessThreshold = 0.01f;   // Порог пригодности
+    };
+    
+    // Результат BUFFER-X регистрации
+    struct RegistrationResult {
+        Eigen::Matrix4f transformation;     // Матрица трансформации
+        Eigen::Matrix4f icpTransformation; // ICP уточнение (если включено)
+        float fitness = 0.0f;           // Оценка пригодности (0-1)
+        bool converged = false;         // Сошлась ли ICP
+        bool success = false;
+        QString error;
+    };
+    
+    // Регистрация BUFFER-X (заглушка - требует AI сервис)
+    RegistrationResult registerBufferX(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+        const BufferXParams &params = {});
+    
+    // Гибридная регистрация: BUFFER-X + ICP
+    RegistrationResult registerHybrid(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+        const BufferXParams &params = {});
+    
+    // DINOReg регистрация (опционально)
+    RegistrationResult registerDINO(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source,
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target,
+        bool useColorImages = false);  // Использовать RGB+Depth изображения
+    
+    // === Легкая Mesh генерация ===
+    
+    // Параметры LightweightMR
+    struct MeshQualityParams {
+        enum Quality { Low, Medium, High };
+        Quality quality = Medium;
+        float avgEdgeLength = 0.01f;  // Средняя длина ребра
+        int targetVertices = 50000; // Целевое число вершин
+    };
+    
+    // Результат генерации Mesh
+    struct MeshResult {
+        pcl::PolygonMesh mesh;
+        int vertexCount = 0;
+        int faceCount = 0;
+        bool success = false;
+        QString error;
+    };
+    
+    // Генерация легкой сетки LightweightMR (заглушка)
+    MeshResult generateLightweightMesh(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        const MeshQualityParams &params = {});
+    
+    // === Улучшение и рефайнинг ===
+    
+    // Параметры SuperPC
+    struct SuperPCParams {
+        bool denoise = true;           // Удаление шума
+        bool fill = true;              // Заполнение дыр
+        bool densify = true;            // Увеличение плотности
+        bool colorize = false;         // Колоризация
+        float strength = 0.5f;         // Сила эффекта (0-1)
+    };
+    
+    // Улучшение SuperPC
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr enhanceSuperPC(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        const SuperPCParams &params = {});
+    
+    // RARE рефайнинг
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr refineRARE(
+        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,
+        float qualityImprovement = 0.15f);  // Ожидаемое улучшение качества
+    
+    // Установить AI клиент для коммуникации с AIService
+    static void setAiClient(AiClient *client);
+    
+    // === Параметры Poisson ===
+
     // Параметры Poisson-реконструкции. Значения по умолчанию выбраны под
     // объекты 0.2–0.5 м, отсканированные Astra Pro на расстоянии ~0.5–1.0 м.
     // depth — логарифм размера сетки октодерева (8 = 256^3, 9 = 512^3, …).
