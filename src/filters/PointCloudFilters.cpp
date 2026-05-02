@@ -446,7 +446,7 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
     }
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         qInfo() << "[NPMFF] Starting AI segmentation, cloud size:" << cloud->size();
 
         QEventLoop loop;
@@ -601,7 +601,7 @@ PointCloudFilters::RegistrationResult PointCloudFilters::registerBufferX(
     }
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         qInfo() << "[BUFFER-X] Starting registration...";
         QEventLoop loop;
         QTimer timeoutTimer;
@@ -730,7 +730,7 @@ PointCloudFilters::RegistrationResult PointCloudFilters::registerDINO(
     }
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         QEventLoop loop;
         
         QObject::connect(g_aiClient, &AiClient::registrationFinished,
@@ -771,7 +771,7 @@ PointCloudFilters::MeshResult PointCloudFilters::generateLightweightMesh(
     }
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         QEventLoop loop;
         QString meshPath;
         
@@ -856,7 +856,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::enhanceSuperPC(
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr resultCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         QEventLoop loop;
         QString resultPath;
         
@@ -916,7 +916,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::refineRARE(
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr resultCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
     
     // Если AI клиент доступен - используем его
-    if (g_aiClient && g_aiClient->isAvailable()) {
+    if (false && g_aiClient && g_aiClient->isAvailable()) {
         QEventLoop loop;
         QString resultPath;
         
