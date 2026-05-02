@@ -27,7 +27,7 @@ find_package(OpenCV REQUIRED)
 # Минимальная версия 1.12 — Ubuntu 22.04 (jammy) в apt, 1.14 на 24.04 (noble).
 # Все используемые API (фильтры, ICP, Poisson, IO, visualization) присутствуют
 # начиная с 1.12; более новые версии также подходят.
-find_package(PCL 1.12 REQUIRED COMPONENTS common io visualization filters registration features surface)
+find_package(PCL 1.12 REQUIRED COMPONENTS common io visualization filters registration features surface segmentation)
 find_package(VTK REQUIRED COMPONENTS
     CommonCore
     FiltersSources
