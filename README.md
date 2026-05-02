@@ -26,6 +26,51 @@
 | Настройки | `SettingsManager` (QSettings) — хранит параметры ICP / Poisson / фильтров / директории экспорта и проектов между запусками. |
 | Асинхронные операции | Poisson, ICP-merge и фильтры (SOR / ROR / Voxel / Magic Wand) выполняются в `QtConcurrent::run` + `QFutureWatcher`, GUI не блокируется. Параллельный запуск нескольких фильтров заблокирован — кнопки отключаются до завершения текущей операции. |
 | Логирование | Qt `messageHandler` → `logs/scanner.log` (ротация: >10 МБ → `.old`) + отдельная вкладка «Логи» в GUI. |
+| AI Pipeline | Полная интеграция AI-моделей для автоматической обработки 3D-сканов. |
+
+---
+
+## AI Pipeline
+
+AstraScanner включает полную интеграцию AI-моделей для автоматической обработки 3D-сканов. AI-функции работают через микросервис AIService или используют встроенные fallback-алгоритмы.
+
+### Модели и функции
+
+| Модель | Репозиторий | Назначение |
+|--------|------------|-----------|
+| NPMFF-Net | [NPMFF-Net](https://arxiv.org/abs/...) | Сегментация без обучения |
+| BUFFER-X | [MIT-SPARK/BUFFER-X](https://github.com/MIT-SPARK/BUFFER-X) | Геометрическая регистрация с нулевым выстрелом |
+| DINOReg | [ccjccjccj/DINOReg](https://github.com/ccjccjccj/DINOReg) | RGB-D регистрация с Vision Foundation |
+| LightweightMR | [CharizardChenZhang/LightweightMR](https://github.com/CharizardChenZhang/LightweightMR) | Легкая mesh-реконструкция (CVPR 2025) |
+| SuperPC | [sairlab/superpc](https://github.com/sairlab/superpc) | Улучшение качества (денойз, заполнение, уплотнение) |
+| RARE | [zhengcy-lambo/RARE](https://github.com/zhengcy-lambo/RARE) | Рефайнинг с нулевым выстрелом |
+
+### AI Функции в GUI
+
+- **Сегментация**: кнопка «Сегмент AI (NPMFF-Net)» на вкладке «Обработка»
+- **Регистрация**: выбор стратегии (ICP / BUFFER-X+ICP / DINO) + кнопка «BUFFER-X Align»
+- **Mesh**: «Предварительный просмотр Lightweight Mesh»
+- **Улучшение**: кнопки «SuperPC Enhance» и «RARE Refine»
+- **Полный конвейер**: кнопка «Full AI Pipeline» для автоматического прогона всех сканов через всю цепочку
+
+### AIService
+
+Python-микросервис для AI-моделей (FastAPI/gRPC). Запускается отдельно:
+
+```bash
+cd aiservice
+pip install -r requirements.txt
+python __init__.py --host localhost --port 8000
+```
+
+Или через Docker:
+
+```bash
+docker build -t aiservice aiservice/
+docker run -p 8000:8000 aiservice
+```
+
+При недоступности AIService используются встроенные fallback-алгоритмы (Region Growing для сегментации, ICP для регистрации, Poisson для mesh).
 
 ---
 
@@ -40,6 +85,7 @@
 | PCL | **PCL ≥ 1.12** (`find_package(PCL 1.12 REQUIRED ...)`), компоненты `common io visualization filters registration features surface`. |
 | VTK | `CommonCore`, `FiltersSources`, `InteractionStyle`, `RenderingOpenGL2`, `RenderingQt`, `GUISupportQt`. |
 | OpenCV | 4.x. |
+| Python | 3.11+ (для AIService). |
 | CPU | Intel Core i5 / AMD Ryzen 5. |
 | ОЗУ | 8 ГБ (16 ГБ рекомендуется для Poisson-реконструкции). |
 | GPU | OpenGL 3.2+. |
@@ -327,6 +373,7 @@ GitHub Actions CI на проекте отключён. Причина — не�
 - **Поворотный стол.** Реализован упрощённый режим на вкладке «Сканирование» (группа «Режим поворотный стол»): задаётся интервал и число сканов, по таймеру текущее облако автоматически сохраняется в проект и накопитель очищается. Калиброванной механической платформы по-прежнему нет — ICP-мерж из произвольных ракурсов запускается отдельной кнопкой на вкладке «Обработка».
 - **Нет встроенной пост-обработки цвета и текстурирования меша** — Poisson-реконструкция работает только с геометрией; цвет вершин берётся из ближайшей точки облака при экспорте.
 - **Нет автоматического определения петли (loop closure)** при ICP-мерже большого числа сканов — попарная регистрация накапливает дрейф.
+- **AI-модели требуют GPU.** Для inference AI-моделей (NPMFF-Net, BUFFER-X, LightweightMR, SuperPC, RARE) рекомендуется GPU с CUDA. На CPU inference работает значительно медленнее.
 
 ---
 

@@ -568,6 +568,35 @@ void MainWindow::setupUI()
     registrationProgress->setValue(0);
     registrationLayout->addWidget(registrationProgress);
 
+    // === AI Регистрация (стратегия) ===
+    QGroupBox *aiRegGroup = new QGroupBox("AI Регистрация", this);
+    QVBoxLayout *aiRegLayout = new QVBoxLayout(aiRegGroup);
+    
+    QLabel *aiRegHint = new QLabel(
+        "Выберите стратегию регистрации:", this);
+    aiRegLayout->addWidget(aiRegHint);
+    
+    QHBoxLayout *strategyRow = new QHBoxLayout();
+    QLabel *strategyLabel = new QLabel("Стратегия:", this);
+    QComboBox *strategyCombo = new QComboBox(this);
+    strategyCombo->addItem("Только ICP", "icp");
+    strategyCombo->addItem("BUFFER-X + ICP", "bufferx_icp");
+    strategyCombo->addItem("DINO регистрация", "dino");
+    strategyCombo->setToolTip("BUFFER-X: грубая регистрация + ICP; DINO: Vision Foundation модель");
+    strategyRow->addWidget(strategyLabel);
+    strategyRow->addWidget(strategyCombo);
+    strategyRow->addStretch();
+    aiRegLayout->addLayout(strategyRow);
+    
+    QPushButton *bufferXAlignBtn = new QPushButton("BUFFER-X Align", this);
+    bufferXAlignBtn->setToolTip("Запустить грубую регистрацию BUFFER-X.");
+    aiRegLayout->addWidget(bufferXAlignBtn);
+    
+    QLabel *aiRegStatusLabel = new QLabel("Готов", this);
+    aiRegLayout->addWidget(aiRegStatusLabel);
+    
+    registrationLayout->addWidget(aiRegGroup);
+
     QLabel *icpStatusLabel = new QLabel("", this);
     registrationLayout->addWidget(icpStatusLabel);
 
@@ -995,6 +1024,62 @@ void MainWindow::setupUI()
 
             onMergeScansClicked(p);
         });
+    
+    // === AI Registration (BUFFER-X / DINO) ===
+    connect(bufferXAlignBtn, &QPushButton::clicked, this, 
+            [this, strategyCombo, aiRegStatusLabel]() {
+        if (!m_project || m_project->scanCount() < 2) {
+            QMessageBox::information(this, "Регистрация",
+                "Нужно минимум 2 скана в проекте.");
+            return;
+        }
+        
+        QString strategy = strategyCombo->currentData().toString();
+        aiRegStatusLabel->setText("Регистрация " + strategy + "...");
+        
+        // Получаем первый и второй скан
+        auto source = m_project->scanCloud(0);
+        auto target = m_project->scanCloud(1);
+        if (!source || !target) {
+            aiRegStatusLabel->setText("Ошибка загрузки сканов");
+            return;
+        }
+        
+        auto *watcher = new QFutureWatcher<PointCloudFilters::RegistrationResult>(this);
+        connect(watcher, &QFutureWatcher<PointCloudFilters::RegistrationResult>::finished,
+                this, [this, watcher, aiRegStatusLabel]() {
+            auto result = watcher->result();
+            if (result.success) {
+                aiRegStatusLabel->setText(
+                    QString("Регистрация: fitness=%1").arg(result.fitness));
+            } else {
+                aiRegStatusLabel->setText("Ошибка: " + result.error);
+                QMessageBox::warning(this, "Регистрация", 
+                    "Ошибка: " + result.error);
+            }
+            watcher->deleteLater();
+        });
+        
+        QFuture<PointCloudFilters::RegistrationResult> future = 
+            QtConcurrent::run([this, source, target, strategy]() {
+                PointCloudFilters::BufferXParams params;
+                params.useICPRefinement = true;
+                
+                if (strategy == "bufferx_icp") {
+                    return m_filters->registerHybrid(source, target, params);
+                } else if (strategy == "dino") {
+                    return m_filters->registerDINO(source, target, false);
+                } else {
+                    // pure ICP fallback
+                    auto aligned = m_filters->registerPointCloudsICP(
+                        source, target, params.icpMaxDistance, params.icpMaxIterations);
+                    PointCloudFilters::RegistrationResult res;
+                    res.success = aligned != nullptr;
+                    return res;
+                }
+            });
+        watcher->setFuture(future);
+    });
 
     connect(addMergedBtn, &QPushButton::clicked, this, &MainWindow::onSaveMergedToProject);
 
