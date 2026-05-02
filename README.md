@@ -94,6 +94,142 @@ docker run -p 8000:8000 aiservice
 
 ---
 
+## Быстрый старт
+
+### Предварительные требования
+
+1. **Windows 10/11 x64** (для полной поддержки камеры)
+2. **Visual Studio 2022** с компонентами:
+   - "Desktop development with C++"
+   - "Linux and Embedded Development with C++" (опционально)
+3. **Git for Windows**
+4. **CMake 3.22+**
+5. **Python 3.11+** (для AI Service)
+
+### Пошаговая установка
+
+#### Шаг 1: Клонирование репозитория
+
+```powershell
+git clone https://github.com/Klischa/AstraScanner.git
+cd AstraScanner
+```
+
+#### Шаг 2: Установка vcpkg
+
+```powershell
+# Создайте директорию для vcpkg (например, C:\dev)
+New-Item -Path C:\dev -ItemType Directory -Force
+cd C:\dev
+
+# Клонируйте vcpkg
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+
+# Запустите bootstrap
+.\bootstrap-vcpkg.bat
+
+# Интегрируйте
+vcpkg integrate install
+```
+
+#### Шаг 3: Установка зависимостей
+
+```powershell
+vcpkg install qt6-base qt6-opengl qt6-concurrent opencv4 pcl[core,visualization,surface,registration,features,kdtree] vtk --host-only
+```
+
+> **Примечание:** Установка может занять 15-30 минут в зависимости от системы.
+
+#### Шаг 4: Установка OpenNI2 SDK (опционально)
+
+Для поддержки камеры Astra Pro:
+1. Скачайте [Orbbec OpenNI2 SDK](https://orbbec3d.com/download/)
+2. Распакуйте в `C:\orbbec\OpenNI_2.3.0.86_Win64-Release\sdk`
+
+#### Шаг 5: Сборка проекта
+
+```powershell
+# Вернитесь в директорию проекта
+cd C:\путь\к\AstraScanner
+
+# Создайте директорию сборки
+mkdir build
+cd build
+
+# Настройка CMake
+cmake -B . -S .. `
+  -DCMAKE_TOOLCHAIN_FILE=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DOPENNI2_ROOT=C:\orbbec\OpenNI_2.3.0.86_Win64-Release\sdk `
+  -DCMAKE_BUILD_TYPE=Release
+
+# Сборка
+cmake --build . --config Release
+```
+
+#### Шаг 6: Запуск
+
+```powershell
+# Исполняемый файл находится в:
+# build\Release\AstraScanner.exe
+```
+
+---
+
+### Запуск AI Service (опционально)
+
+AI Pipeline требует запуска AI Service для полной функциональности:
+
+```powershell
+# Установка зависимостей
+cd aiservice
+pip install -r requirements.txt
+
+# Запуск сервиса
+python __init__.py --host localhost --port 8000
+```
+
+Или через Docker:
+
+```bash
+cd aiservice
+docker build -t aiservice .
+docker run -p 8000:8000 aiservice
+```
+
+**Примечание:** Если AI Service недоступен, приложение использует встроенные fallback-алгоритмы.
+
+---
+
+### Использование AI Pipeline
+
+1. **Запустите приложение** (`AstraScanner.exe`)
+
+2. **Сканирование:**
+   - Подключите камеру Astra Pro или используйте emulation-режим
+   - Нажмите "Сканирование" для захвата облака точек
+   - Используйте поворотный стол для автоматического сканирования
+
+3. **Обработка (вкладка "Обработка"):**
+   - Примените фильтры (SOR, ROR, Voxel Grid)
+   - **Сегмент AI (NPMFF-Net)** - автоматическая сегментация
+   - **Полный AI Pipeline** - обработка всех сканов через AI-модели
+
+4. **Регистрация:**
+   - Выберите стратегию (ICP / BUFFER-X+ICP / DINO)
+   - Нажмите "BUFFER-X Align" для AI-регистрации
+   - "Объединить все сканы" для ICP-мержа
+
+5. **Mesh:**
+   - "Построить меш" - Poisson реконструкция
+   - "Предварительный просмотр Lightweight Mesh" - AI mesh
+
+6. **Экспорт:**
+   - Экспорт облака в PLY/PCD
+   - Экспорт меша в PLY/STL/OBJ
+
+---
+
 ## Зависимости и сборка
 
 ### 1. vcpkg
