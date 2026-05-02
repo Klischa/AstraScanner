@@ -456,14 +456,14 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
         timeoutTimer.start(30000);
 
         QObject::connect(g_aiClient, &AiClient::segmentationFinished,
-                        [\&](const QVector<int> &indices, bool success) {
+                        [&](const QVector<int> &indices, bool success) {
             receivedIndices = indices;
             result.success = success;
             qInfo() << "[NPMFF] AI response: success=" << success << ", points=" << indices.size();
             loop.quit();
         });
 
-        QObject::connect(&timeoutTimer, &QTimer::timeout, [\&]() {
+        QObject::connect(&timeoutTimer, &QTimer::timeout, [&]() {
             qWarning() << "[NPMFF] Timeout after 30s";
             result.error = "timeout";
             result.success = false;
