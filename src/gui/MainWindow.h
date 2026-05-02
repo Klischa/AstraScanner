@@ -220,6 +220,7 @@ private:
     QCheckBox       *m_turntableEnableChk = nullptr;
     QSpinBox        *m_turntableIntervalSpin = nullptr;
     QSpinBox        *m_turntableCountSpin = nullptr;
+    QComboBox      *m_turntableModeCombo = nullptr;
     QLabel          *m_turntableStatusLabel = nullptr;
     int              m_turntableCaptured = 0;
 
