@@ -451,8 +451,14 @@ void MainWindow::setupUI()
     segmentAIBtn->setToolTip("Запустить автоматическую сегментацию NPMFF-Net.");
     QPushButton *filterByIndicesBtn = new QPushButton("Фильтр по индексам", this);
     filterByIndicesBtn->setToolTip("Фильтровать облако по списку индексов.");
+    QPushButton *enhanceSuperPCBtn = new QPushButton("Enhance (SuperPC)", this);
+    enhanceSuperPCBtn->setToolTip("Улучшение качества облака через SuperPC.");
+    QPushButton *fullPipelineBtn = new QPushButton("Full AI Pipeline", this);
+    fullPipelineBtn->setToolTip("Автоматическая обработка всех сканов через всю цепочку AI.");
     aiSegmentBtnRow->addWidget(segmentAIBtn);
     aiSegmentBtnRow->addWidget(filterByIndicesBtn);
+    aiSegmentBtnRow->addWidget(enhanceSuperPCBtn);
+    aiSegmentBtnRow->addWidget(fullPipelineBtn);
     aiSegmentBtnRow->addStretch();
     aiSegmentLayout->addLayout(aiSegmentBtnRow);
     
@@ -745,10 +751,13 @@ void MainWindow::setupUI()
     meshLayout->addWidget(normalOrientGroup);
 
     QPushButton *reconstructBtn = new QPushButton("Построить меш", this);
+    QPushButton *reconstructLightweightBtn = new QPushButton("Lightweight MR (AI)", this);
+    reconstructLightweightBtn->setToolTip("Создать облегчённую сетку через AI (NPMFF-Net).");
     QPushButton *showCloudBtn   = new QPushButton("Показать облако", this);
     QPushButton *exportMeshBtnP = new QPushButton("Экспорт меша…", this);
     QHBoxLayout *meshBtnRow = new QHBoxLayout();
     meshBtnRow->addWidget(reconstructBtn);
+    meshBtnRow->addWidget(reconstructLightweightBtn);
     meshBtnRow->addWidget(showCloudBtn);
     meshBtnRow->addWidget(exportMeshBtnP);
     meshBtnRow->addStretch();
@@ -803,6 +812,7 @@ void MainWindow::setupUI()
         });
 
     connect(showCloudBtn, &QPushButton::clicked, this, &MainWindow::onShowCloudClicked);
+    connect(reconstructLightweightBtn, &QPushButton::clicked, this, &MainWindow::onReconstructLightweightClicked);
     connect(exportMeshBtnP, &QPushButton::clicked, this, &MainWindow::onExportMesh);
 
     connect(sorBtn, &QPushButton::clicked, this, [this, sorMeanKSpin, sorThreshSpin]() {
@@ -1006,6 +1016,80 @@ void MainWindow::setupUI()
             aiSegmentStatusLabel->setText(
                 QString("Оставлено %1 точек").arg(filtered->size()));
         }
+    });
+    // === Enhance SuperPC ===
+    connect(enhanceSuperPCBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+                QMessageBox::information(this, "Enhance", "Облако пустое.");
+                return;
+            }
+            snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+        }
+        setFilterButtonsEnabled(false);
+        aiSegmentStatusLabel->setText("Enhance SuperPC...");
+        auto *watcher = new QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>::finished,
+                this, [this, watcher, aiSegmentStatusLabel]() {
+            auto result = watcher->result();
+            if (result) {
+                QMutexLocker locker(&m_cloudMutex);
+                *m_accumulatedCloud = *result;
+                emit cloudSizeChanged(static_cast<int>(result->size()));
+                updateViewer();
+                aiSegmentStatusLabel->setText(QString("Enhance: %1 точек").arg(result->size()));
+            } else {
+                aiSegmentStatusLabel->setText("Enhance error");
+            }
+            setFilterButtonsEnabled(true);
+            watcher->deleteLater();
+        });
+        QFuture<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> future = QtConcurrent::run([this, snapshot]() {
+            return m_filters->enhanceSuperPC(snapshot);
+        });
+        watcher->setFuture(future);
+    });
+
+    // === Full AI Pipeline ===
+    connect(fullPipelineBtn, &QPushButton::clicked, this, [this, aiSegmentStatusLabel]() {
+        if (m_scans.empty()) {
+            QMessageBox::information(this, "Full Pipeline", "Нет сканов для обработки.");
+            return;
+        }
+        aiSegmentStatusLabel->setText("Full Pipeline...");
+        statusBar()->showMessage("Full AI Pipeline: обработка...");
+        // Обрабатываем все сканы через цепочку
+        auto *watcher = new QFutureWatcher<QVector<int>>(this);
+        connect(watcher, &QFutureWatcher<QVector<int>>::finished,
+                this, [this, watcher, aiSegmentStatusLabel]() {
+            auto results = watcher->result();
+            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(results.size()));
+            refreshScansList();
+            watcher->deleteLater();
+        });
+        QFuture<QVector<int>> future = QtConcurrent::run([this]() {
+            QVector<int> resultIds;
+            for (int i = 0; i < m_scans.size(); ++i) {
+                auto cloud = m_scans[i];
+                // Сегментация NPMFF
+                PointCloudFilters::NPMFFParams npmffParams;
+                auto segResult = m_filters->segmentNPMFF(cloud, npmffParams);
+                if (segResult.success && !segResult.foregroundIndices.isEmpty()) {
+                    cloud = m_filters->filterByIndices(cloud, segResult.foregroundIndices, true);
+                    m_scans[i] = cloud;
+                }
+                // Enhance SuperPC
+                auto enhanced = m_filters->enhanceSuperPC(cloud);
+                if (enhanced) {
+                    m_scans[i] = enhanced;
+                }
+                resultIds.append(i);
+            }
+            return resultIds;
+        });
+        watcher->setFuture(future);
     });
 
     connect(mergeScansBtn, &QPushButton::clicked, this,
@@ -1953,6 +2037,52 @@ void MainWindow::onSaveMergedToProject()
     refreshScansList();
     statusBar()->showMessage(
         QString("Сохранено как скан #%1 «%2»").arg(index).arg(name.trimmed()), 5000);
+}
+
+void MainWindow::onReconstructLightweightClicked()
+{
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
+            QMessageBox::information(this, "Lightweight MR", "Облако пустое.");
+            return;
+        }
+        snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+
+    // AI mesh generation через PointCloudFilters
+    if (m_meshStatusLabel) m_meshStatusLabel->setText("Lightweight MR: подготовка...");
+    statusBar()->showMessage("Lightweight MR: генерация...");
+
+    PointCloudFilters::MeshQualityParams params;
+    params.quality = PointCloudFilters::MeshQualityParams::Quality::Medium;
+
+    auto *watcher = new QFutureWatcher<PointCloudFilters::MeshResult>(this);
+    connect(watcher, &QFutureWatcher<PointCloudFilters::MeshResult>::finished,
+            this, [this, watcher]() {
+        auto result = watcher->result();
+        if (result.success) {
+            if (m_meshStatusLabel) m_meshStatusLabel->setText(
+                QString("Lightweight MR: %1 вершин, %2 граней")
+                    .arg(result.vertexCount).arg(result.faceCount));
+            statusBar()->showMessage("Lightweight MR: готово", 3000);
+            // Показываем mesh
+            if (m_viewer && !result.mesh.polygons.empty()) {
+                m_viewer->addPolygonMesh(result.mesh, "lightweight_mesh");
+                m_meshViewerId = "lightweight_mesh";
+            }
+        } else {
+            QMessageBox::warning(this, "Lightweight MR", "Ошибка: " + result.error);
+            if (m_meshStatusLabel) m_meshStatusLabel->setText("Lightweight MR: ошибка");
+        }
+        watcher->deleteLater();
+    });
+
+    QFuture<PointCloudFilters::MeshResult> future = QtConcurrent::run([this, snapshot, params]() {
+        return m_filters->reconstructMesh(snapshot, params);
+    });
+    watcher->setFuture(future);
 }
 
 void MainWindow::onShowCloudClicked()

@@ -97,6 +97,7 @@ private slots:
 
     // --- Poisson-реконструкция ---
     void onReconstructMeshClicked(const PointCloudFilters::PoissonParams &params);
+    void onReconstructLightweightClicked();
     void onShowCloudClicked();
     void onPoissonFinished();
 
