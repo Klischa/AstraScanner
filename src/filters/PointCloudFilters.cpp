@@ -511,7 +511,8 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
                 maxClusterIdx = static_cast<int>(i);
             }
         }
-        
+
+        if (!clusters.empty() && maxClusterSize > 0) {
             // Convert PCL indices to QVector
             QVector<int> indices;
             for (int idx : clusters[maxClusterIdx].indices) indices.append(idx);
@@ -520,7 +521,7 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
             qInfo() << "[NPMFF] Region Growing found" << clusters.size()
                    << "clusters, largest has" << maxClusterSize << "points";
         }
-        
+
         emit progressUpdated(100);
         
     } catch (const std::exception &e) {
