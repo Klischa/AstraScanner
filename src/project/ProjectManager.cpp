@@ -12,7 +12,6 @@
 namespace {
 constexpr const char *kMetadataFile = "project.json";
 constexpr const char *kScansSubdir  = "scans";
-constexpr const char *kAiTempSubdir = "ai_temp";  // Промежуточные AI артефакты
 
 // QString → std::string для передачи в PCL/std::ofstream.
 // На Windows toStdString() даёт UTF-8, но std::ofstream ожидает кодировку
@@ -42,11 +41,6 @@ QString ProjectManager::scansDirPath() const
     return QDir(m_projectDir).filePath(kScansSubdir);
 }
 
-QString ProjectManager::aiTempDir() const
-{
-    if (m_projectDir.isEmpty()) return {};
-    return QDir(m_projectDir).filePath(kAiTempSubdir);
-}
 
 bool ProjectManager::createAiTempDir()
 {

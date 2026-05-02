@@ -547,7 +547,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::filterByIndices(
         }
     } else {
         // Удалить указанные индексы
-        std::set<int> indexSet = QSet<int>::fromList(QVector<int>::toList(indices)).toSet();
+        std::set<int> indexSet = std::set<int>(indices.begin(), indices.end());
         for (int i = 0; i < static_cast<int>(cloud->size()); ++i) {
             if (!indexSet.contains(i)) {
                 filtered->push_back(cloud->points[i]);
@@ -604,7 +604,7 @@ PointCloudFilters::RegistrationResult PointCloudFilters::registerBufferX(
         
         // Если включен ICP refinement
         if (result.success && params.useICPRefinement) {
-            auto aligned = boost::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+            auto aligned = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
             pcl::transformPointCloud(*source, *aligned, result.transformation);
             
             pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
