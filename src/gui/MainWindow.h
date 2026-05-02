@@ -26,6 +26,7 @@
 #include <vtkSmartPointer.h>
 
 #include "../filters/PointCloudFilters.h"
+#include "../ai/AiClient.h"
 
 QT_BEGIN_NAMESPACE
 class QTabWidget;
@@ -178,6 +179,7 @@ private:
     // --- Проект / экспорт ---
     ProjectManager *m_project = nullptr;
     ExportManager *m_exporter = nullptr;
+    AiClient *m_aiClient = nullptr;
     QListWidget *m_scansList = nullptr;
     QLabel *m_projectStatusLabel = nullptr;
     // Последний реконструированный меш (Poisson). Пустой, пока не нажата

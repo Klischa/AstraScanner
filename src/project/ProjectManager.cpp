@@ -243,6 +243,17 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr ProjectManager::scanCloud(int index)
     return item.cloud;
 }
 
+bool ProjectManager::setScanCloud(int index, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
+{
+    if (index < 0 || index >= m_scans.size()) return false;
+    if (!cloud || cloud->empty()) return false;
+    ScanItem &item = m_scans[index];
+    item.cloud = cloud;
+    item.pointCount = static_cast<int>(cloud->size());
+    setDirty(true);
+    return true;
+}
+
 bool ProjectManager::writeMetadata()
 {
     m_lastError.clear();

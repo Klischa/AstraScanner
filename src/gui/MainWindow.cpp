@@ -68,6 +68,13 @@ MainWindow::MainWindow(QWidget* parent)
     m_frameSkip = SettingsManager::instance().frameSkip();
 
     m_filters = new PointCloudFilters(this);
+    
+    // Инициализация AI клиента для сегментации и реконструкции
+    m_aiClient = new AiClient(this);
+    m_aiClient->setServiceUrl("http://localhost:8000");
+    PointCloudFilters::setAiClient(m_aiClient);
+    qInfo() << "[MainWindow] AI client initialized at localhost:8000";
+
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
     connect(m_project, &ProjectManager::projectChanged, this, [this]() {
@@ -1058,44 +1065,65 @@ void MainWindow::setupUI()
             QMessageBox::information(this, "Full Pipeline", "Нет сканов для обработки.");
             return;
         }
-        if (m_project->scanCount() < 2) {
-            QMessageBox::information(this, "Full Pipeline", "Нужен хотя бы 1 скан.");
-            return;
-        }
         aiSegmentStatusLabel->setText("Full Pipeline...");
         statusBar()->showMessage("Full AI Pipeline: обработка...");
-        // Обрабатываем все сканы через цепочку
-        auto *watcher = new QFutureWatcher<int>(this);
-        connect(watcher, &QFutureWatcher<int>::finished,
+        
+        // Собираем облака в главном потре (безопасный доступ)
+        QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> cloudList;
+        for (int i = 0; i < m_project->scanCount(); ++i) {
+            auto cloud = m_project->scanCloud(i);
+            if (cloud && !cloud->empty()) {
+                cloudList.append(cloud);
+            }
+        }
+        if (cloudList.isEmpty()) {
+            QMessageBox::information(this, "Full Pipeline", "Нет валидных сканов.");
+            return;
+        }
+        
+        // Обрабатываем в фоне - только облака, без m_project
+        auto *watcher = new QFutureWatcher<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>(this);
+        connect(watcher, &QFutureWatcher<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>>::finished,
                 this, [this, watcher, aiSegmentStatusLabel]() {
-            int processed = watcher->result();
-            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(processed));
+            auto results = watcher->result();
+            // Обновляем сканы в главном потре
+            for (int i = 0; i < results.size() && i < m_project->scanCount(); ++i) {
+                if (results[i] && !results[i]->empty()) {
+                    m_project->setScanCloud(i, results[i]);
+                }
+            }
+            aiSegmentStatusLabel->setText(QString("Done: %1 scans").arg(results.size()));
             refreshScansList();
             watcher->deleteLater();
         });
-        QFuture<int> future = QtConcurrent::run([this]() {
-            int count = 0;
-            for (int i = 0; i < m_project->scanCount(); ++i) {
-                auto cloud = m_project->scanCloud(i);
-                if (!cloud || cloud->empty()) continue;
-                // Сегментация NPMFF
-                PointCloudFilters::NPMFFParams npmffParams;
-                auto segResult = m_filters->segmentNPMFF(cloud, npmffParams);
-                if (segResult.success && !segResult.foregroundIndices.isEmpty()) {
-                    cloud = m_filters->filterByIndices(cloud, segResult.foregroundIndices, true);
+        QFuture<QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr>> future = 
+            QtConcurrent::run([this, cloudList]() {
+                QVector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> out;
+                for (auto cloud : cloudList) {
+                    if (!cloud || cloud->empty()) {
+                        out.append(cloud);
+                        continue;
+                    }
+                    // Сегментация NPMFF
+                    PointCloudFilters::NPMFFParams npmffParams;
+                    auto segResult = m_filters->segmentNPMFF(cloud, npmffParams);
+                    if (segResult.success && !segResult.foregroundIndices.isEmpty()) {
+                        cloud = m_filters->filterByIndices(cloud, segResult.foregroundIndices, true);
+                    }
+                    if (!cloud || cloud->empty()) {
+                        out.append(cloud);
+                        continue;
+                    }
+                    // Enhance SuperPC
+                    auto enhanced = m_filters->enhanceSuperPC(cloud);
+                    if (enhanced && !enhanced->empty()) {
+                        out.append(enhanced);
+                    } else {
+                        out.append(cloud);
+                    }
                 }
-                if (!cloud || cloud->empty()) continue;
-                // Enhance SuperPC
-                auto enhanced = m_filters->enhanceSuperPC(cloud);
-                if (enhanced && !enhanced->empty()) {
-                    m_project->setScanCloud(i, enhanced);
-                } else if (cloud->empty() == false) {
-                    m_project->setScanCloud(i, cloud);
-                }
-                count++;
-            }
-            return count;
-        });
+                return out;
+            });
         watcher->setFuture(future);
     });
 
