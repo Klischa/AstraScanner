@@ -7,6 +7,7 @@
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/surface/poisson.h>
 #include <pcl/common/io.h>
+#include <pcl/io/ply_io.h>
 #include <pcl/common/centroid.h>
 #include <pcl/segmentation/region_growing.h>
 #include <pcl/segmentation/sac_segmentation.h>
@@ -549,7 +550,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudFilters::filterByIndices(
         // Удалить указанные индексы
         std::set<int> indexSet = std::set<int>(indices.begin(), indices.end());
         for (int i = 0; i < static_cast<int>(cloud->size()); ++i) {
-            if (!indexSet.contains(i)) {
+            if (indexSet.find(i) == indexSet.end()) {
                 filtered->push_back(cloud->points[i]);
             }
         }
