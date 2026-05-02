@@ -12,6 +12,8 @@
 #include <pcl/registration/icp.h>
 #include <pcl/features/normal_3d.h>
 
+class AiClient;  // Forward declaration
+
 class PointCloudFilters : public QObject
 {
     Q_OBJECT

@@ -21,7 +21,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL Concurrent Network)
 find_package(OpenCV REQUIRED)
 # surface нужен для Poisson-реконструкции; остальные — как и раньше.
 # Минимальная версия 1.12 — Ubuntu 22.04 (jammy) в apt, 1.14 на 24.04 (noble).

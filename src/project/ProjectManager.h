@@ -5,6 +5,7 @@
 #include <QString>
 #include <QVector>
 #include <QDateTime>
+#include <QDir>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
