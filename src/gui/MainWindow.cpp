@@ -318,6 +318,15 @@ void MainWindow::setupUI()
         "накопитель. Работает только при открытом проекте и активном сканировании.");
     turntableLayout->addWidget(m_turntableEnableChk);
 
+    // Режим: отдельные сканы или накопление
+    m_turntableModeCombo = new QComboBox(this);
+    m_turntableModeCombo->addItem("Отдельные", "separate");
+    m_turntableModeCombo->addItem("Накопление", "accumulate");
+    m_turntableModeCombo->setCurrentIndex(1);
+    m_turntableModeCombo->setToolTip("Отдельные - каждый скан отдельно. Накопление - всё в одно облако");
+    turntableLayout->addWidget(new QLabel("Режим:", this));
+    turntableLayout->addWidget(m_turntableModeCombo);
+
     turntableLayout->addWidget(new QLabel("Интервал:", this));
     m_turntableIntervalSpin = new QSpinBox(this);
     m_turntableIntervalSpin->setRange(1, 600);
@@ -2154,6 +2163,8 @@ void MainWindow::onTurntableTick()
         return;
     }
 
+    QString mode = m_turntableModeCombo ? m_turntableModeCombo->currentData().toString() : "separate";
+    
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
     {
         QMutexLocker locker(&m_cloudMutex);
@@ -2167,9 +2178,43 @@ void MainWindow::onTurntableTick()
             return;
         }
         snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
-        m_accumulatedCloud->clear();
+        
+        // При накоплении - НЕ очищаем облако
+        if (mode != "accumulate") {
+            m_accumulatedCloud->clear();
+        }
     }
 
+    if (mode == "accumulate") {
+        // Режим накопления: объединяем с предыдущими сканами
+        if (m_project->scanCount() > 0) {
+            auto lastCloud = m_project->scanCloud(m_project->scanCount() - 1);
+            if (lastCloud && !lastCloud->empty()) {
+                *snapshot += *lastCloud;
+            }
+        }
+        // Сохраняем как скан 0 (перезаписываем)
+        m_project->setScanCloud(0, snapshot);
+        
+        ++m_turntableCaptured;
+        
+        if (m_turntableStatusLabel) {
+            m_turntableStatusLabel->setText(
+                QString("Накопление: %1 точек (скан %2)")
+                    .arg(snapshot->size()).arg(m_turntableCaptured));
+        }
+        qInfo() << "[Turntable] accumulate:" << snapshot->size() << "points";
+        
+        const int target = m_turntableCountSpin->value();
+        if (m_turntableCaptured >= target) {
+            m_turntableTimer->stop();
+            if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
+            statusBar()->showMessage("Готово!", 3000);
+        }
+        return;
+    }
+
+    // Режим "separate" - старый код
     const QString name = QString("turntable_%1_%2")
         .arg(m_turntableCaptured + 1, 3, 10, QChar('0'))
         .arg(QDateTime::currentDateTime().toString("HHmmss"));
