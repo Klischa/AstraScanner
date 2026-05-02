@@ -65,6 +65,9 @@ public:
     // Возвращает облако — при необходимости подгружает из файла.
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr scanCloud(int index);
 
+    // Обновляет облако существующего скана (in-place). cloud должен быть валидным.
+    bool setScanCloud(int index, const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+
     QString lastError() const { return m_lastError; }
 
     // AI временная директория для промежуточных артефактов
