@@ -258,9 +258,44 @@ void MainWindow::setupUI()
     });
 
     // Вкладка "Сканирование"
+    // Lasso moved here for easier access during scanning
     QWidget* scanTab = new QWidget();
     m_tabWidget->addTab(scanTab, "Сканирование");
     QVBoxLayout* scanLayout = new QVBoxLayout(scanTab);
+
+    // --- Ручное редактирование облака (лассо) ---
+    // Позволяет нарисовать произвольный контур во вьюере и удалить/оставить
+    // только точки, проекция которых в экранных координатах попала в
+    // полигон. Полезно для локальных выбросов.
+    QGroupBox *lassoGroup = new QGroupBox("Ручное редактирование (лассо)", this);
+    QVBoxLayout *lassoLayout = new QVBoxLayout(lassoGroup);
+
+    QLabel *lassoHint = new QLabel(
+        "Нарисуйте контур во вьюере левой кнопкой мыши. Esc — отменить.", this);
+    lassoHint->setWordWrap(true);
+    lassoLayout->addWidget(lassoHint);
+
+    QHBoxLayout *lassoBtnRow = new QHBoxLayout();
+    m_lassoDeleteBtn = new QPushButton("Удалить выделенное", this);
+    m_lassoDeleteBtn->setToolTip(
+        "Удалить из текущего облака все точки, попавшие в нарисованный контур.");
+    m_lassoKeepBtn = new QPushButton("Оставить только выделенное", this);
+    m_lassoKeepBtn->setToolTip(
+        "Оставить только точки внутри контура; остальное — удалить.");
+    m_undoEditBtn = new QPushButton("Отменить правку", this);
+    m_undoEditBtn->setToolTip("Вернуть облако в состояние до последней правки.");
+    m_undoEditBtn->setEnabled(false);
+
+    lassoBtnRow->addWidget(m_lassoDeleteBtn);
+    lassoBtnRow->addWidget(m_lassoKeepBtn);
+    lassoBtnRow->addWidget(m_undoEditBtn);
+    lassoBtnRow->addStretch();
+    lassoLayout->addLayout(lassoBtnRow);
+
+    m_lassoStatusLabel = new QLabel("Готов к редактированию", this);
+    lassoLayout->addWidget(m_lassoStatusLabel);
+
+    scanLayout->addWidget(lassoGroup);
 
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     m_previewBtn = new QPushButton("Preview", this);
@@ -485,49 +520,7 @@ void MainWindow::setupUI()
     
     processingLayout->addWidget(filterGroup);
 
-    // --- Ручное редактирование облака (лассо) ---
-    // Позволяет нарисовать произвольный контур во вьюере и удалить/оставить
-    // только точки, проекция которых в экранных координатах попала в
-    // полигон. Полезно для локальных выбросов, которые не хватает SOR/ROR —
-    // например, стол, задний фон, блики. Перед каждой операцией делается
-    // snapshot облака; «Отменить» возвращает последний.
-    QGroupBox *lassoGroup = new QGroupBox("Ручное редактирование (лассо)", this);
-    QVBoxLayout *lassoLayout = new QVBoxLayout(lassoGroup);
-
-    QLabel *lassoHint = new QLabel(
-        "Нарисуйте контур во вьюере левой кнопкой мыши. Esc — отменить.", this);
-    lassoHint->setWordWrap(true);
-    lassoLayout->addWidget(lassoHint);
-
-    QHBoxLayout *lassoBtnRow = new QHBoxLayout();
-    m_lassoDeleteBtn = new QPushButton("Удалить выделенное", this);
-    m_lassoDeleteBtn->setToolTip(
-        "Удалить из текущего облака все точки, попавшие в нарисованный контур.");
-    m_lassoKeepBtn = new QPushButton("Оставить только выделенное", this);
-    m_lassoKeepBtn->setToolTip(
-        "Оставить только точки внутри контура; остальное — удалить.");
-    m_undoEditBtn = new QPushButton("Отменить правку", this);
-    m_undoEditBtn->setToolTip("Вернуть облако в состояние до последней правки.");
-    m_undoEditBtn->setEnabled(false);
-
-    lassoBtnRow->addWidget(m_lassoDeleteBtn);
-    lassoBtnRow->addWidget(m_lassoKeepBtn);
-    lassoBtnRow->addWidget(m_undoEditBtn);
-    lassoBtnRow->addStretch();
-    lassoLayout->addLayout(lassoBtnRow);
-
-    m_lassoStatusLabel = new QLabel("Готов к редактированию", this);
-    lassoLayout->addWidget(m_lassoStatusLabel);
-
-    processingLayout->addWidget(lassoGroup);
-
-    connect(m_lassoDeleteBtn, &QPushButton::clicked,
-            this, &MainWindow::onLassoDeleteClicked);
-    connect(m_lassoKeepBtn, &QPushButton::clicked,
-            this, &MainWindow::onLassoKeepClicked);
-    connect(m_undoEditBtn, &QPushButton::clicked,
-            this, &MainWindow::onUndoEditClicked);
-
+    // Registration moved to processing tab
     QGroupBox* registrationGroup = new QGroupBox("Регистрация сканов (ICP)", this);
     QVBoxLayout* registrationLayout = new QVBoxLayout(registrationGroup);
 
@@ -2186,11 +2179,20 @@ void MainWindow::onTurntableTick()
     }
 
     if (mode == "accumulate") {
-        // Режим накопления: объединяем с предыдущими сканами
+        // Режим накопления: объединяем с предыдущими сканами через ICP
         if (m_project->scanCount() > 0) {
-            auto lastCloud = m_project->scanCloud(m_project->scanCount() - 1);
+            auto lastCloud = m_project->scanCloud(0); // скан 0 - накопленное облако
             if (lastCloud && !lastCloud->empty()) {
-                *snapshot += *lastCloud;
+                // Выравниваем через ICP перед объединением
+                double maxCorr = 0.05; // 5cm
+                int maxIter = 50;
+                auto aligned = m_filters->registerPointCloudsICP(snapshot, lastCloud, maxCorr, maxIter);
+                if (aligned && !aligned->empty()) {
+                    *aligned += *lastCloud;
+                    snapshot = aligned;
+                } else {
+                    *snapshot += *lastCloud;
+                }
             }
         }
         // Сохраняем как скан 0 (перезаписываем)
@@ -2260,6 +2262,23 @@ namespace {
 // Лимит снимков в undo-стеке. На больших облаках (несколько М точек)
 // каждый снимок весит десятки МБ, 10 штук = верхний край «допустимого».
 constexpr std::size_t kMaxEditUndo = 10;
+
+// Вспомогательная функция: расстояние от точки до отрезка
+double pointToLineDistance(const QPointF &pt, const QPointF &lineStart, const QPointF &lineEnd)
+{
+    const double dx = lineEnd.x() - lineStart.x();
+    const double dy = lineEnd.y() - lineStart.y();
+    const double lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-10) {
+        // Отрезок вырожден в точку
+        return QLineF(lineStart, pt).length();
+    }
+    // Проекция точки на прямую
+    double t = ((pt.x() - lineStart.x()) * dx + (pt.y() - lineStart.y()) * dy) / lenSq;
+    t = std::clamp(t, 0.0, 1.0);
+    const QPointF proj(lineStart.x() + t * dx, lineStart.y() + t * dy);
+    return QLineF(pt, proj).length();
+}
 
 } // namespace
 
@@ -2365,27 +2384,90 @@ void MainWindow::onLassoCompleted(const QPolygonF &polygonWidget)
     const bool keep = (m_lassoOp == LassoOp::Keep);
     std::size_t removed = 0;
 
+    // Получаем bounds рендерера для проверки границ
+    double bounds[6];
+    m_vtkRenderer->GetBounds(bounds);
+    const double boundsDiag = std::sqrt(
+        (bounds[1]-bounds[0])*(bounds[1]-bounds[0]) +
+        (bounds[3]-bounds[2])*(bounds[3]-bounds[2]) +
+        (bounds[5]-bounds[4])*(bounds[5]-bounds[4]));
+    const double tolerance = boundsDiag * 0.01; // 1% от диагонали - допуск
+
+    // Проецируем ВСЕ точки (не только видимые), проверяем проекции
     for (std::size_t i = 0; i < N; ++i) {
         const auto &pt = snapshot->points[i];
         if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
-            // Невалидные точки в любом случае отбрасываем — незачем их
-            // тащить через правку.
+            // Невалидные точки в любом случае отбрасываем
             ++removed;
             continue;
         }
+
         double world[4] = {pt.x, pt.y, pt.z, 1.0};
         m_vtkRenderer->SetWorldPoint(world);
         m_vtkRenderer->WorldToDisplay();
         double disp[3];
         m_vtkRenderer->GetDisplayPoint(disp);
 
-        const QPointF d(disp[0], disp[1]);
-        const bool inside = polyDisplay.containsPoint(d, Qt::OddEvenFill);
+        // Проверяем все точки - внутри полигона или на его границе с допуском
+        QPointF d(disp[0], disp[1]);
+        bool inside = polyDisplay.containsPoint(d, Qt::OddEvenFill);
+        
+        // Если точка около границы полигона - тоже считаем за inside
+        if (!inside && !polyDisplay.isEmpty()) {
+            for (int j = 0; j < polyDisplay.size(); ++j) {
+                QPointF edgeStart = polyDisplay[j];
+                QPointF edgeEnd = polyDisplay[(j + 1) % polyDisplay.size()];
+                double dist = pointToLineDistance(d, edgeStart, edgeEnd);
+                if (dist < tolerance) {
+                    inside = true;
+                    break;
+                }
+            }
+        }
+        
         const bool accept = keep ? inside : !inside;
         if (accept) {
             result->push_back(pt);
         } else {
             ++removed;
+        }
+    }
+
+    // Улучшенный алгоритм: используем bounding box для фильтрации
+    // Если результат изменился мало - пробуем иначе
+    if (result->size() > N * 0.95 || result->size() < N * 0.05) {
+        // Мало изменилось - используем другой подход: 
+        // проверяем ВСЕ точки вне зависимости от видимости камере
+        result->clear();
+        result->reserve(N);
+        
+        // Bounding box полигона
+        QRectF polyBounds = polyDisplay.boundingRect();
+        
+        for (std::size_t i = 0; i < N; ++i) {
+            const auto &pt = snapshot->points[i];
+            if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
+                ++removed;
+                continue;
+            }
+            
+            double world[4] = {pt.x, pt.y, pt.z, 1.0};
+            m_vtkRenderer->SetWorldPoint(world);
+            m_vtkRenderer->WorldToDisplay();
+            double disp[3];
+            m_vtkRenderer->GetDisplayPoint(disp);
+            
+            QPointF d(disp[0], disp[1]);
+            
+            // Проверяем попадание в bounding box + точный тест
+            bool inside = polyBounds.contains(d) && polyDisplay.containsPoint(d, Qt::OddEvenFill);
+            const bool accept = keep ? inside : !inside;
+            
+            if (accept) {
+                result->push_back(pt);
+            } else {
+                ++removed;
+            }
         }
     }
 
