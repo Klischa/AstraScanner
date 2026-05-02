@@ -1,5 +1,6 @@
 #include "PointCloudFilters.h"
 #include <QDebug>
+#include <QTimer>
 #include <pcl/common/transforms.h>
 #include <pcl/registration/icp.h>
 #include <pcl/features/normal_3d.h>
@@ -446,30 +447,43 @@ PointCloudFilters::SegmentationResult PointCloudFilters::segmentNPMFF(
     
     // Если AI клиент доступен - используем его
     if (g_aiClient && g_aiClient->isAvailable()) {
-        // Вызываем AI сервис для сегментации
-        // Асинхронный вызов - для синхронного результата используем QEventLoop
+        qInfo() << "[NPMFF] Starting AI segmentation, cloud size:" << cloud->size();
+
         QEventLoop loop;
         QVector<int> receivedIndices;
-        
+        QTimer timeoutTimer;
+        timeoutTimer.setSingleShot(true);
+        timeoutTimer.start(30000);
+
         QObject::connect(g_aiClient, &AiClient::segmentationFinished,
-                        [&](const QVector<int> &indices, bool success) {
+                        [\&](const QVector<int> &indices, bool success) {
             receivedIndices = indices;
             result.success = success;
+            qInfo() << "[NPMFF] AI response: success=" << success << ", points=" << indices.size();
             loop.quit();
         });
-        
+
+        QObject::connect(&timeoutTimer, &QTimer::timeout, [\&]() {
+            qWarning() << "[NPMFF] Timeout after 30s";
+            result.error = "timeout";
+            result.success = false;
+            loop.quit();
+        });
+
+        qInfo() << "[NPMFF] Calling AI service...";
         g_aiClient->segmentNPMFF(cloud);
-        loop.exec();  // Ждём результат
-        
+        qInfo() << "[NPMFF] Waiting...";
+        loop.exec();
+        qInfo() << "[NPMFF] Done, success=" << result.success;
+
         if (result.success) {
             result.foregroundIndices = receivedIndices;
-            qInfo() << "[NPMFF] AI segmentation succeeded with"
-                   << receivedIndices.size() << "points";
+            qInfo() << "[NPMFF] AI segmentation succeeded with" << receivedIndices.size() << "points";
         } else {
             result.error = g_aiClient->lastError();
             qWarning() << "[NPMFF] AI segmentation failed:" << result.error;
         }
-        
+
         return result;
     }
     
@@ -588,23 +602,36 @@ PointCloudFilters::RegistrationResult PointCloudFilters::registerBufferX(
     
     // Если AI клиент доступен - используем его
     if (g_aiClient && g_aiClient->isAvailable()) {
+        qInfo() << "[BUFFER-X] Starting registration...";
         QEventLoop loop;
-        
+        QTimer timeoutTimer;
+        timeoutTimer.setSingleShot(true);
+        timeoutTimer.start(60000); // 60s timeout
+
         QObject::connect(g_aiClient, &AiClient::registrationFinished,
                         [&](const Eigen::Matrix4f &transform, bool success) {
             result.transformation = transform;
             result.success = success;
             result.fitness = success ? 0.95f : 0.0f;
+            qInfo() << "[BUFFER-X] AI response: success=" << success;
             loop.quit();
         });
-        
+
+        QObject::connect(&timeoutTimer, &QTimer::timeout, [&]() {
+            qWarning() << "[BUFFER-X] Timeout after 60s";
+            result.error = "timeout";
+            result.success = false;
+            loop.quit();
+        });
+
         g_aiClient->registerBUFFERX(source, target, params.useICPRefinement);
         loop.exec();
-        
+
         if (!result.success) {
             result.error = g_aiClient->lastError();
+            qWarning() << "[BUFFER-X] Failed:" << result.error;
         }
-        
+
         // Если включен ICP refinement
         if (result.success && params.useICPRefinement) {
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZRGB>());
