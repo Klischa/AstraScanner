@@ -18,6 +18,11 @@
 #include <pcl/PolygonMesh.h>
 #include <QFutureWatcher>
 #include <QFuture>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QProcess>
+#include <QEventLoop>
 #include <QPolygonF>
 #include <opencv2/opencv.hpp>
 
@@ -181,6 +186,8 @@ private:
     ProjectManager *m_project = nullptr;
     ExportManager *m_exporter = nullptr;
     AiClient *m_aiClient = nullptr;
+    QProcess *m_aiServiceProcess = nullptr;
+    bool startAiService();
     QListWidget *m_scansList = nullptr;
     QLabel *m_projectStatusLabel = nullptr;
     // Последний реконструированный меш (Poisson). Пустой, пока не нажата

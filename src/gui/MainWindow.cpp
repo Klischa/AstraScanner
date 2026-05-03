@@ -74,6 +74,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_aiClient->setServiceUrl("http://localhost:8000");
     PointCloudFilters::setAiClient(m_aiClient);
     qInfo() << "[MainWindow] AI client initialized at localhost:8000";
+    
+    // Запуск AIService как встроенный процесс
+    startAiService();
 
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
@@ -2573,4 +2576,52 @@ void MainWindow::onUndoEditClicked()
         QString("Правка отменена, восстановлено %1 точек").arg(snap->size()));
     qInfo() << "[Lasso] undo: restored" << snap->size() << "points, undo stack ="
             << m_editUndo.size();
+}
+// ========== AI Service ==========
+bool MainWindow::startAiService()
+{
+    // Проверяем, запущен ли уже AIService
+    QNetworkAccessManager nam;
+    QNetworkRequest req(QUrl("http://localhost:8000/health"));
+    QNetworkReply *reply = nam.get(req);
+    QEventLoop loop;
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer::singleShot(500, &loop, &QEventLoop::quit);
+    loop.exec();
+    
+    if (reply->error() == QNetworkReply::NoError) {
+        qInfo() << "[AIService] Already running at localhost:8000";
+        reply->deleteLater();
+        return true;
+    }
+    reply->deleteLater();
+    
+    // AIService не запущен - пробуем запустить
+    qInfo() << "[AIService] Starting...";
+    
+    // Пробуем разные способы запуска
+    QStringList possibleCmds = {
+        QCoreApplication::applicationDirPath() + "/aiservice.exe",
+        QCoreApplication::applicationDirPath() + "/aiservice.bat",
+        "python " + QCoreApplication::applicationDirPath() + "/aiservice/__init__.py",
+        "py " + QCoreApplication::applicationDirPath() + "/aiservice/__init__.py"
+    };
+    
+    for (const QString &cmd : possibleCmds) {
+        m_aiServiceProcess = new QProcess(this);
+        m_aiServiceProcess->setProcessChannelMode(QProcess::MergedChannels);
+        
+        m_aiServiceProcess->start(cmd);
+        
+        if (m_aiServiceProcess->waitForStarted(3000)) {
+            qInfo() << "[AIService] Started:" << cmd;
+            return true;
+        }
+        
+        delete m_aiServiceProcess;
+        m_aiServiceProcess = nullptr;
+    }
+    
+    qWarning() << "[AIService] Failed to start (optional)";
+    return false;  // Не критично
 }
