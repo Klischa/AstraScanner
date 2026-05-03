@@ -1328,6 +1328,12 @@ void MainWindow::onStopClicked()
     m_scanning = false;
     m_cloudProcessing = false;
     
+    // Останавливаем таймер поворотного стола при ручной остановке
+    if (m_turntableTimer && m_turntableTimer->isActive()) {
+        m_turntableTimer->stop();
+        qInfo() << "[Turntable] stopped by user";
+    }
+    
     // Автосохранение накопленного облака
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr savedCloud;
     {
@@ -2170,6 +2176,12 @@ void MainWindow::onTurntableToggled(bool enabled)
 
 void MainWindow::onTurntableTick()
 {
+    // Проверяем что сканирование активно
+    if (!m_scanning) {
+        // Таймер тикает но сканирование не идёт - пропускаем
+        return;
+    }
+    
     if (!m_project || !m_project->isOpen()) {
         qWarning() << "[Turntable] project closed mid-run — stopping";
         m_turntableTimer->stop();
