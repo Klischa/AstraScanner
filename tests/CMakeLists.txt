@@ -20,26 +20,28 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network)
 # Находим PCL
 find_package(PCL 1.12 REQUIRED COMPONENTS common io filters)
 
-# Пути к исходникам главного проекта для включения заголовочных файлов
+# Пути к исходникам главного проекта
 set(PROJECT_ROOT ${CMAKE_SOURCE_DIR}/..)
 
 enable_testing()
 
-# Тесты фильтров - требуют заголовочный файл PointCloudFilters.h
+# Тесты фильтров
 add_executable(test_filters ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_filters.cpp)
 target_include_directories(test_filters PRIVATE
     ${PROJECT_ROOT}/src/filters
     ${PROJECT_ROOT}/include
+    ${PCL_INCLUDE_DIRS}
 )
 target_link_libraries(test_filters
     GTest::gtest_main
     Qt6::Core Qt6::Widgets
-    PCLCommon PCLFilters
+    ${PCL_LIBRARIES}
 )
 add_test(NAME FiltersTests COMMAND test_filters)
 
-# Тесты облака - требуют заголовки PCL
+# Тесты облака
 add_executable(test_cloud ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_cloud.cpp)
+target_include_directories(test_cloud PRIVATE ${PCL_INCLUDE_DIRS})
 target_link_libraries(test_cloud
     GTest::gtest_main
     Qt6::Core
