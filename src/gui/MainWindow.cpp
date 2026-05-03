@@ -1324,6 +1324,28 @@ void MainWindow::onStopClicked()
     m_scanTimeoutTimer->stop();
     m_scanning = false;
     m_cloudProcessing = false;
+    
+    // Автосохранение накопленного облака
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr savedCloud;
+    {
+        QMutexLocker locker(&m_cloudMutex);
+        if (m_accumulatedCloud && !m_accumulatedCloud->empty()) {
+            savedCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+            m_accumulatedCloud->clear(); // Очистить после сохранения
+        }
+    }
+    
+    // Сохранить в проект если есть накопленное облако
+    if (savedCloud && !savedCloud->empty() && m_project && m_project->isOpen()) {
+        QString name = QString("scan_%1").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+        int idx = m_project->addScan(savedCloud, name);
+        if (idx >= 0) {
+            qInfo() << "[Auto-save] saved as scan" << idx << ":" << savedCloud->size() << "points";
+            refreshScansList();
+            updateViewer();
+        }
+    }
+    
     stopCapture();
     m_previewBtn->setEnabled(true);
     m_scanBtn->setEnabled(true);
