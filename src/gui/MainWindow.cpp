@@ -2202,12 +2202,19 @@ void MainWindow::onTurntableTick()
                     .arg(snapshot->size()).arg(m_turntableCaptured));
         }
         qInfo() << "[Turntable] accumulate:" << snapshot->size() << "points";
-        
+
+        // Обновить список сканов и окно просмотра
+        refreshScansList();
+        updateViewer();
+
         const int target = m_turntableCountSpin->value();
         if (m_turntableCaptured >= target) {
             m_turntableTimer->stop();
             if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
             statusBar()->showMessage("Готово!", 3000);
+            // Обновить после завершения накопления
+            refreshScansList();
+            updateViewer();
         }
         return;
     }
