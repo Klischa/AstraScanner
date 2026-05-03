@@ -81,10 +81,9 @@ TEST(SimpleFiltersTest, StatisticalOutlierRemoval)
     
     EXPECT_EQ(cloud->size(), 120u);
     
-    // StatisticalOutlierRemoval
+    // StatisticalOutlierRemoval - используем стандартные параметры
     pcl::StatisticalOutlierRemoval<PointXYZRGB> sor;
     sor.setMeanK(10);
-    sor.setStdDevMulThresh(0.5);
     sor.setInputCloud(cloud);
     
     CloudPtr filtered(new pcl::PointCloud<PointXYZRGB>);
