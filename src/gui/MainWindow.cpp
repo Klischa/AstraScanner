@@ -1858,12 +1858,22 @@ void MainWindow::onReconstructMeshClicked(const PointCloudFilters::PoissonParams
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr snapshot;
     {
         QMutexLocker locker(&m_cloudMutex);
+        // Используем текущее накопленное облако
         if (!m_accumulatedCloud || m_accumulatedCloud->empty()) {
-            QMessageBox::information(this, "Реконструкция", "Облако пустое.");
+            QMessageBox::information(this, "Реконструкция", 
+                "Облако пустое. Запустите сканирование или выберите скан.");
             return;
         }
-        // Копия, чтобы не держать mutex пока Poisson работает секунды-минуты.
         snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+    }
+    
+    qInfo() << "[Poisson] Starting with" << snapshot->size() << "points";
+    
+    if (snapshot->size() < 1000) {
+        QMessageBox::warning(this, "Реконструкция",
+            QString("Слишком мало точек (%1). Нужно минимум 1000 для реконструкции.")
+                .arg(snapshot->size()));
+        return;
     }
 
     if (m_poissonWatcher && m_poissonWatcher->isRunning()) {
