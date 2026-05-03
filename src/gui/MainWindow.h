@@ -35,6 +35,7 @@ class QVTKOpenGLNativeWidget;
 class QCheckBox;
 class QSpinBox;
 class QDoubleSpinBox;
+class QComboBox;
 QT_END_NAMESPACE
 
 class CaptureWorker;
