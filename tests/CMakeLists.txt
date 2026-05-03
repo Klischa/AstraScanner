@@ -23,7 +23,7 @@ find_package(PCL 1.12 REQUIRED COMPONENTS common filters)
 enable_testing()
 
 # PCL фильтры тест
-add_executable(test_pcl_filters ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_pcl_filters.cpp)
+add_executable(test_pcl_filters ${CMAKE_CURRENT_SOURCE_DIR}/test_pcl_filters.cpp)
 target_include_directories(test_pcl_filters PRIVATE ${PCL_INCLUDE_DIRS})
 target_link_libraries(test_pcl_filters
     GTest::gtest_main
