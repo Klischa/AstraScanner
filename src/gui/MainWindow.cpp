@@ -2217,6 +2217,19 @@ void MainWindow::onTurntableTick()
 
     if (mode == "accumulate") {
         // Режим накопления: объединяем с предыдущими сканами через ICP
+        // Также сохраняем КАЖДЫЙ скан отдельно для истории
+        const QString saveName = QString("accumulated_%1").arg(m_turntableCaptured + 1, 2, 10, QChar('0'));
+        {
+            QMutexLocker locker(&m_cloudMutex);
+            if (m_accumulatedCloud && !m_accumulatedCloud->empty()) {
+                // Сохраняем промежуточный скан
+                auto tempCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(*m_accumulatedCloud);
+                m_project->addScan(tempCloud, saveName);
+                qInfo() << "[Turntable] Saved intermediate:" << saveName << "," << tempCloud->size() << "points";
+            }
+        }
+        
+        // Теперь объединяем с предыдущим накоплением
         if (m_project->scanCount() > 0) {
             auto lastCloud = m_project->scanCloud(0); // скан 0 - накопленное облако
             if (lastCloud && !lastCloud->empty()) {
@@ -2230,11 +2243,16 @@ void MainWindow::onTurntableTick()
                     snapshot = aligned;
                 } else {
                     qWarning() << "[Turntable] ICP failed, using simple concatenation";
-                    *snapshot += *lastCloud;
+                    // Просто добавляем без выравнивания
+                    pcl::PointCloud<pcl::PointXYZRGB> merged;
+                    *merged += *snapshot;
+                    *merged += *lastCloud;
+                    snapshot = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>(merged);
                 }
             }
         }
-        // Сохраняем как скан 0 (перезаписываем)
+        
+        // Сохраняем как скан 0 (основное накопленное облако)
         m_project->setScanCloud(0, snapshot);
         
         ++m_turntableCaptured;
