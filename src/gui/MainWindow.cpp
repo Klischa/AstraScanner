@@ -2225,9 +2225,11 @@ void MainWindow::onTurntableTick()
                 int maxIter = 50;
                 auto aligned = m_filters->registerPointCloudsICP(snapshot, lastCloud, maxCorr, maxIter);
                 if (aligned && !aligned->empty()) {
+                    qInfo() << "[Turntable] ICP aligned:" << aligned->size() << "points";
                     *aligned += *lastCloud;
                     snapshot = aligned;
                 } else {
+                    qWarning() << "[Turntable] ICP failed, using simple concatenation";
                     *snapshot += *lastCloud;
                 }
             }
@@ -2249,16 +2251,18 @@ void MainWindow::onTurntableTick()
         updateViewer();
 
         const int target = m_turntableCountSpin->value();
+        qInfo() << "[Turntable] captured" << m_turntableCaptured << "/" << target;
+        
         if (m_turntableCaptured >= target) {
             m_turntableTimer->stop();
             if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
             statusBar()->showMessage("Готово!", 3000);
             // Останавливаем захват после завершения всех поворотов
-            onStopClicked();
+            QTimer::singleShot(100, this, &MainWindow::onStopClicked);
             // Обновить после завершения накопления
             refreshScansList();
             updateViewer();
-            qInfo() << "[Turntable] All turns completed, capture stopped";
+            qInfo() << "[Turntable] All turns completed";
         }
         return;
     }
