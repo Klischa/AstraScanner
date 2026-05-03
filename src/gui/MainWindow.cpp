@@ -2386,7 +2386,7 @@ void MainWindow::onLassoCompleted(const QPolygonF &polygonWidget)
 
     // Получаем bounds рендерера для проверки границ
     double bounds[6];
-    m_vtkRenderer->GetBounds(bounds);
+    m_vtkRenderer->BoundingBox.GetBounds(bounds);
     const double boundsDiag = std::sqrt(
         (bounds[1]-bounds[0])*(bounds[1]-bounds[0]) +
         (bounds[3]-bounds[2])*(bounds[3]-bounds[2]) +
