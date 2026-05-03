@@ -2598,10 +2598,12 @@ bool MainWindow::startAiService()
     QNetworkReply *reply = nam.get(req);
     QEventLoop loop;
     QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QTimer::singleShot(500, &loop, &QEventLoop::quit);
+    QTimer::singleShot(1000, &loop, &QEventLoop::quit);  // 1 сек достаточно
     loop.exec();
     
-    if (reply->error() == QNetworkReply::NoError) {
+    // Проверяем: нет ошибки ИЛИ это 405 Method Not Allowed (означает что сервер работает но health может быть POST)
+    if (reply->error() == QNetworkReply::NoError || 
+        reply->error() == QNetworkReply::ContentNotFoundError) {  // 404 тоже норм
         qInfo() << "[AIService] Already running at localhost:8000";
         reply->deleteLater();
         return true;
@@ -2615,24 +2617,34 @@ bool MainWindow::startAiService()
     QStringList possibleCmds = {
         QCoreApplication::applicationDirPath() + "/aiservice.exe",
         QCoreApplication::applicationDirPath() + "/aiservice.bat",
-        "python " + QCoreApplication::applicationDirPath() + "/aiservice/__init__.py",
-        "py " + QCoreApplication::applicationDirPath() + "/aiservice/__init__.py"
+        "python",
+        "py"
     };
     
+    QString aiserverPath = QCoreApplication::applicationDirPath() + "/aiservice/__init__.py";
+    
     for (const QString &cmd : possibleCmds) {
+        delete m_aiServiceProcess;
         m_aiServiceProcess = new QProcess(this);
         m_aiServiceProcess->setProcessChannelMode(QProcess::MergedChannels);
         
-        m_aiServiceProcess->start(cmd);
+        QStringList args;
+        if (cmd == "python" || cmd == "py") {
+            args << aiserverPath;
+        }
+        
+        m_aiServiceProcess->start(cmd, args);
         
         if (m_aiServiceProcess->waitForStarted(3000)) {
+            // Даем сервису время запуститься
+            QThread::msleep(1000);
             qInfo() << "[AIService] Started:" << cmd;
             return true;
         }
-        
-        delete m_aiServiceProcess;
-        m_aiServiceProcess = nullptr;
     }
+    
+    delete m_aiServiceProcess;
+    m_aiServiceProcess = nullptr;
     
     qWarning() << "[AIService] Failed to start (optional)";
     return false;  // Не критично
