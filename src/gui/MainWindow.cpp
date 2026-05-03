@@ -1586,7 +1586,6 @@ void MainWindow::onNewProject()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
-    });
 }
 
 void MainWindow::onOpenProject()
@@ -1607,7 +1606,6 @@ void MainWindow::onOpenProject()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
-    });
 }
 
 void MainWindow::onSaveProject()
@@ -1642,7 +1640,6 @@ void MainWindow::onSaveProjectAs()
     }
     SettingsManager::instance().setProjectsDirectory(QFileInfo(dir).absolutePath());
     refreshScansList();
-    });
 }
 
 void MainWindow::onAddCurrentCloudToProject()
@@ -2028,7 +2025,6 @@ void MainWindow::onSaveMergedToProject()
         return;
     }
     refreshScansList();
-    });
     statusBar()->showMessage(
         QString("Сохранено как скан #%1 «%2»").arg(index).arg(name.trimmed()), 5000);
 }
@@ -2386,7 +2382,7 @@ void MainWindow::onLassoCompleted(const QPolygonF &polygonWidget)
 
     // Получаем bounds рендерера для проверки границ
     double bounds[6];
-    m_vtkRenderer->ComputeVisibleBounds(bounds);
+    m_vtkRenderer->ComputeVisiblePropBounds(bounds);
     const double boundsDiag = std::sqrt(
         (bounds[1]-bounds[0])*(bounds[1]-bounds[0]) +
         (bounds[3]-bounds[2])*(bounds[3]-bounds[2]) +
