@@ -15,15 +15,22 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # Находим Qt6 для тестов
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Network)
 
 # Находим PCL
 find_package(PCL 1.12 REQUIRED COMPONENTS common io filters)
 
+# Пути к исходникам главного проекта для включения заголовочных файлов
+set(PROJECT_ROOT ${CMAKE_SOURCE_DIR}/..)
+
 enable_testing()
 
-# Тесты фильтров
+# Тесты фильтров - требуют заголовочный файл PointCloudFilters.h
 add_executable(test_filters ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_filters.cpp)
+target_include_directories(test_filters PRIVATE
+    ${PROJECT_ROOT}/src/filters
+    ${PROJECT_ROOT}/include
+)
 target_link_libraries(test_filters
     GTest::gtest_main
     Qt6::Core Qt6::Widgets
@@ -31,7 +38,7 @@ target_link_libraries(test_filters
 )
 add_test(NAME FiltersTests COMMAND test_filters)
 
-# Тесты облака
+# Тесты облака - требуют заголовки PCL
 add_executable(test_cloud ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_cloud.cpp)
 target_link_libraries(test_cloud
     GTest::gtest_main
