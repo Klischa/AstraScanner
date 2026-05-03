@@ -2176,9 +2176,13 @@ void MainWindow::onTurntableToggled(bool enabled)
 
 void MainWindow::onTurntableTick()
 {
+    qDebug() << "[Turntable] tick: scanning =" << m_scanning 
+            << ", captured so far =" << m_turntableCaptured;
+    
     // Проверяем что сканирование активно
     if (!m_scanning) {
-        // Таймер тикает но сканирование не идёт - пропускаем
+        qWarning() << "[Turntable] tick: not scanning, stopping timer";
+        m_turntableTimer->stop();
         return;
     }
     
@@ -2249,9 +2253,12 @@ void MainWindow::onTurntableTick()
             m_turntableTimer->stop();
             if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
             statusBar()->showMessage("Готово!", 3000);
+            // Останавливаем захват после завершения всех поворотов
+            onStopClicked();
             // Обновить после завершения накопления
             refreshScansList();
             updateViewer();
+            qInfo() << "[Turntable] All turns completed, capture stopped";
         }
         return;
     }
@@ -2294,6 +2301,9 @@ void MainWindow::onTurntableTick()
             QString("Готово. Сохранено %1 сканов в проекте.\n"
                     "Перейдите на вкладку «Обработка» → «Объединить все сканы проекта», "
                     "чтобы склеить их через ICP.").arg(m_turntableCaptured));
+        // Останавливаем захват после завершения
+        onStopClicked();
+        qInfo() << "[Turntable] All saves completed, capture stopped";
     }
 }
 // ========== Ручное редактирование облака (лассо) ==========
