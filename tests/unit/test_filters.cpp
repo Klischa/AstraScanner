@@ -53,9 +53,10 @@ TEST(FiltersTest, StatisticalFilterRemovesNoise)
     // Добавляем выбросы (шум)
     for (int i = 0; i < 20; ++i) {
         PointXYZRGB pt;
-        pt.x = (rand() % 100) / 10.0f + 10.0f; // Далеко от основных
-        pt.y = (rand() % 100) / 10.0f + 10.0f;
-        pt.z = (rand() % 100) / 10.0f + 10.0f;
+        // Точки далеко от основных
+        pt.x = (rand() % 1000) / 100.0f + 10.0f;
+        pt.y = (rand() % 1000) / 100.0f + 10.0f;
+        pt.z = (rand() % 1000) / 100.0f + 10.0f;
         pt.r = 255; pt.g = 255; pt.b = 255;
         cloud->push_back(pt);
     }
@@ -65,7 +66,8 @@ TEST(FiltersTest, StatisticalFilterRemovesNoise)
     
     // После фильтрации шум должен быть удален
     EXPECT_LT(filtered->size(), cloud->size());
-    EXPECT_GT(filtered->size(), 80u); // Основные точки остались
+    // Но основные точки должны остаться (около 100)
+    EXPECT_GE(filtered->size(), 90u);
 }
 
 // ========== Тест: Граничный случай - пустое облако ==========

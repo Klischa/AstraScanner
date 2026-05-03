@@ -132,8 +132,8 @@ TEST(CloudTest, EmptyCloudMerge)
     EXPECT_EQ(empty->size(), 1u);
     
     // Непустое + пустое
-    CloudPtrcloud2(new pcl::PointCloud<PointXYZRGB>);
-    *cloud += *empty;
+    CloudPtr cloud2(new pcl::PointCloud<PointXYZRGB>);
+    *cloud += *cloud2;
     EXPECT_EQ(cloud->size(), 1u);
 }
 
