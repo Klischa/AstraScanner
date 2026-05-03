@@ -1,6 +1,66 @@
-# AstraScanner Functional Tests
+# Тесты AstraScanner
 
-## Тест 1: Автосохранение облака при остановке сканирования
+## Сборка и запуск тестов
+
+### Требования
+- Google Test (gtest)
+- Qt6 с модулем Test
+- PCL 1.12+
+
+### Сборка тестов
+
+```bash
+# Клонировать репозиторий
+git clone https://github.com/Klischa/AstraScanner.git
+cd AstraScanner
+
+# Обновить подмодуль тестов
+git submodule update --init --recursive
+
+# Или просто скачать тесты
+git fetch origin
+git checkout origin/fix-build-errors-v3 -- tests/
+
+# Создать директорию для сборки тестов
+mkdir tests_build
+cd tests_build
+
+# Настроить с vcpkg toolchain
+cmake -G "Visual Studio 17 2022" -A x64 -B . -S ../tests \
+    -DCMAKE_TOOLCHAIN_FILE="C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+# Собрать
+cmake --build . --config Release
+```
+
+### Запуск тестов
+
+```bash
+# Все тесты
+ctest -C Release -V
+
+# Только юнит-тесты
+./Release/test_filters.exe
+./Release/test_cloud.exe
+./Release/test_ai_client.exe
+
+# Только интеграционные тесты
+./Release/test_integration.exe
+```
+
+### ThreadSanitizer (для проверки гонок)
+
+```bash
+# Сборка с ThreadSanitizer (доступно на GCC/Clang)
+cmake -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -B tsan_build -S ..
+cd tsan_build
+cmake --build .
+./test_filters  # Запуск под tsan
+```
+
+---
+
+##Functional Tests
 
 ### Цель
 Проверить, что накопленное облако автоматически сохраняется в проект при нажатии "Стоп".

@@ -74,6 +74,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_aiClient->setServiceUrl("http://localhost:8000");
     PointCloudFilters::setAiClient(m_aiClient);
     qInfo() << "[MainWindow] AI client initialized at localhost:8000";
+    
+    // Запуск AIService как встроенный процесс
+    startAiService();
 
     m_project = new ProjectManager(this);
     m_exporter = new ExportManager(this);
@@ -1325,6 +1328,12 @@ void MainWindow::onStopClicked()
     m_scanning = false;
     m_cloudProcessing = false;
     
+    // Останавливаем таймер поворотного стола при ручной остановке
+    if (m_turntableTimer && m_turntableTimer->isActive()) {
+        m_turntableTimer->stop();
+        qInfo() << "[Turntable] stopped by user";
+    }
+    
     // Автосохранение накопленного облака
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr savedCloud;
     {
@@ -2167,6 +2176,16 @@ void MainWindow::onTurntableToggled(bool enabled)
 
 void MainWindow::onTurntableTick()
 {
+    qDebug() << "[Turntable] tick: scanning =" << m_scanning 
+            << ", captured so far =" << m_turntableCaptured;
+    
+    // Проверяем что сканирование активно
+    if (!m_scanning) {
+        qWarning() << "[Turntable] tick: not scanning, stopping timer";
+        m_turntableTimer->stop();
+        return;
+    }
+    
     if (!m_project || !m_project->isOpen()) {
         qWarning() << "[Turntable] project closed mid-run — stopping";
         m_turntableTimer->stop();
@@ -2234,9 +2253,12 @@ void MainWindow::onTurntableTick()
             m_turntableTimer->stop();
             if (m_turntableEnableChk) m_turntableEnableChk->setChecked(false);
             statusBar()->showMessage("Готово!", 3000);
+            // Останавливаем захват после завершения всех поворотов
+            onStopClicked();
             // Обновить после завершения накопления
             refreshScansList();
             updateViewer();
+            qInfo() << "[Turntable] All turns completed, capture stopped";
         }
         return;
     }
@@ -2279,6 +2301,9 @@ void MainWindow::onTurntableTick()
             QString("Готово. Сохранено %1 сканов в проекте.\n"
                     "Перейдите на вкладку «Обработка» → «Объединить все сканы проекта», "
                     "чтобы склеить их через ICP.").arg(m_turntableCaptured));
+        // Останавливаем захват после завершения
+        onStopClicked();
+        qInfo() << "[Turntable] All saves completed, capture stopped";
     }
 }
 // ========== Ручное редактирование облака (лассо) ==========
@@ -2573,4 +2598,64 @@ void MainWindow::onUndoEditClicked()
         QString("Правка отменена, восстановлено %1 точек").arg(snap->size()));
     qInfo() << "[Lasso] undo: restored" << snap->size() << "points, undo stack ="
             << m_editUndo.size();
+}
+// ========== AI Service ==========
+bool MainWindow::startAiService()
+{
+    // Проверяем, запущен ли уже AIService
+    QNetworkAccessManager nam;
+    QNetworkRequest req(QUrl("http://localhost:8000/health"));
+    QNetworkReply *reply = nam.get(req);
+    QEventLoop loop;
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer::singleShot(1000, &loop, &QEventLoop::quit);  // 1 сек достаточно
+    loop.exec();
+    
+    // Проверяем: нет ошибки ИЛИ это 405 Method Not Allowed (означает что сервер работает но health может быть POST)
+    if (reply->error() == QNetworkReply::NoError || 
+        reply->error() == QNetworkReply::ContentNotFoundError) {  // 404 тоже норм
+        qInfo() << "[AIService] Already running at localhost:8000";
+        reply->deleteLater();
+        return true;
+    }
+    reply->deleteLater();
+    
+    // AIService не запущен - пробуем запустить
+    qInfo() << "[AIService] Starting...";
+    
+    // Пробуем разные способы запуска
+    QStringList possibleCmds = {
+        QCoreApplication::applicationDirPath() + "/aiservice.exe",
+        QCoreApplication::applicationDirPath() + "/aiservice.bat",
+        "python",
+        "py"
+    };
+    
+    QString aiserverPath = QCoreApplication::applicationDirPath() + "/aiservice/__init__.py";
+    
+    for (const QString &cmd : possibleCmds) {
+        delete m_aiServiceProcess;
+        m_aiServiceProcess = new QProcess(this);
+        m_aiServiceProcess->setProcessChannelMode(QProcess::MergedChannels);
+        
+        QStringList args;
+        if (cmd == "python" || cmd == "py") {
+            args << aiserverPath;
+        }
+        
+        m_aiServiceProcess->start(cmd, args);
+        
+        if (m_aiServiceProcess->waitForStarted(3000)) {
+            // Даем сервису время запуститься
+            QThread::msleep(1000);
+            qInfo() << "[AIService] Started:" << cmd;
+            return true;
+        }
+    }
+    
+    delete m_aiServiceProcess;
+    m_aiServiceProcess = nullptr;
+    
+    qWarning() << "[AIService] Failed to start (optional)";
+    return false;  // Не критично
 }
